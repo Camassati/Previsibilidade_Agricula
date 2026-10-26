@@ -1,0 +1,1000 @@
+DIAGNÓSTICO DO BANCO — gerado em 2026-10-26 15:45:34
+Somente leitura. Nenhuma credencial é impressa neste arquivo.
+
+==============================================================================
+1. VISÃO GERAL
+==============================================================================
+  MySQL 5.7.32-35-log | banco tcc2026 | hora do servidor 2026-10-26 15:45:34
+  13 tabelas: BASE_MODELO, CLIMA_SEMANAL, CONFIGURACAO_SAFRA, CULTURA, DADOS_CLIMATICOS_HISTORICOS, DADOS_CLIMATICOS_HISTORICOS_bkp_20261026_153658, LEITURA_IOT, PONTE_ESTACAO_MUNICIPIO, PRODUTIVIDADE_OBSERVADA, PRODUTIVIDADE_OBSERVADA_bkp_20261026_153658, REGIAO, SENSOR_IOT, TIPO_SOLO
+  esperadas e ausentes : nenhuma
+  presentes e não esperadas: ['BASE_MODELO', 'CLIMA_SEMANAL', 'DADOS_CLIMATICOS_HISTORICOS_bkp_20261026_153658', 'PONTE_ESTACAO_MUNICIPIO', 'PRODUTIVIDADE_OBSERVADA_bkp_20261026_153658']
+  tabelas que só a migração criaria: ['CLIMA_SEMANAL', 'PONTE_ESTACAO_MUNICIPIO', 'BASE_MODELO']
+
+-- tamanho, motor e colação de cada tabela
+  TABLE_NAME                                  ENGINE  linhas_aprox  mb     TABLE_COLLATION     CREATE_TIME          UPDATE_TIME        
+  ------------------------------------------  ------  ------------  -----  ------------------  -------------------  -------------------
+  BASE_MODELO                                 InnoDB  1419          1.52   latin1_general_ci   2026-10-26 15:39:29  2026-10-26 15:39:29
+  CLIMA_SEMANAL                               InnoDB  47838         11.55  utf8mb4_general_ci  2026-10-26 15:39:29  2026-10-26 15:39:05
+  CONFIGURACAO_SAFRA                          InnoDB  0             0.06   latin1_general_ci   2026-08-28 23:42:36  NULL               
+  CULTURA                                     InnoDB  3             0.03   latin1_general_ci   2026-09-07 22:30:36  NULL               
+  DADOS_CLIMATICOS_HISTORICOS                 InnoDB  10521         3.05   utf8mb4_general_ci  2026-10-26 15:39:29  2026-10-26 15:39:15
+  DADOS_CLIMATICOS_HISTORICOS_bkp_20261026_1  InnoDB  5486          1.92   latin1_general_ci   2026-10-26 15:39:29  NULL               
+  LEITURA_IOT                                 InnoDB  684           0.11   latin1_general_ci   2026-08-28 23:42:36  2026-10-22 23:30:49
+  PONTE_ESTACAO_MUNICIPIO                     InnoDB  183           0.05   utf8mb4_general_ci  2026-10-26 15:39:29  2026-10-26 15:39:24
+  PRODUTIVIDADE_OBSERVADA                     InnoDB  32971         8.55   utf8mb4_general_ci  2026-10-26 15:39:29  2026-10-26 15:39:24
+  PRODUTIVIDADE_OBSERVADA_bkp_20261026_15365  InnoDB  43916         10.06  latin1_general_ci   2026-10-26 15:39:29  NULL               
+  REGIAO                                      InnoDB  181           0.06   latin1_general_ci   2026-08-28 23:42:35  2026-10-26 15:30:46
+  SENSOR_IOT                                  InnoDB  1             0.02   latin1_general_ci   2026-08-28 23:42:36  NULL               
+  TIPO_SOLO                                   InnoDB  10            0.03   latin1_general_ci   2026-08-28 23:42:35  NULL               
+  (TABLE_ROWS é estimativa do InnoDB; as contagens exatas vêm abaixo)
+
+-- contagem exata
+  BASE_MODELO                                   1,460
+  CLIMA_SEMANAL                                46,966
+  CONFIGURACAO_SAFRA                                2
+  CULTURA                                           3
+  DADOS_CLIMATICOS_HISTORICOS                  10,773
+  DADOS_CLIMATICOS_HISTORICOS_bkp_20261026_153658      5,456
+  LEITURA_IOT                                     726
+  PONTE_ESTACAO_MUNICIPIO                         183
+  PRODUTIVIDADE_OBSERVADA                      32,979
+  PRODUTIVIDADE_OBSERVADA_bkp_20261026_153658     44,301
+  REGIAO                                          184
+  SENSOR_IOT                                        1
+  TIPO_SOLO                                        10
+
+-- chaves estrangeiras declaradas
+  TABLE_NAME                                  COLUMN_NAME  REFERENCED_TABLE_NAME  REFERENCED_COLUMN_NAME  CONSTRAINT_NAME    
+  ------------------------------------------  -----------  ---------------------  ----------------------  -------------------
+  CLIMA_SEMANAL                               id_regiao    REGIAO                 id_regiao               fk_clima_sem_regiao
+  CONFIGURACAO_SAFRA                          id_cultura   CULTURA                id_cultura              fk_config_cultura  
+  CONFIGURACAO_SAFRA                          id_regiao    REGIAO                 id_regiao               fk_config_regiao   
+  CONFIGURACAO_SAFRA                          id_solo      TIPO_SOLO              id_solo                 fk_config_solo     
+  DADOS_CLIMATICOS_HISTORICOS                 id_regiao    REGIAO                 id_regiao               fk_clima_mes_regiao
+  DADOS_CLIMATICOS_HISTORICOS_bkp_20261026_1  id_regiao    REGIAO                 id_regiao               fk_clima_regiao    
+  LEITURA_IOT                                 id_config    CONFIGURACAO_SAFRA     id_config               fk_leitura_config  
+  LEITURA_IOT                                 id_sensor    SENSOR_IOT             id_sensor               fk_leitura_sensor  
+  PONTE_ESTACAO_MUNICIPIO                     id_regiao    REGIAO                 id_regiao               fk_ponte_regiao    
+
+-- índices e chaves únicas
+  TABLE_NAME                                  INDEX_NAME            NON_UNIQUE  colunas                             
+  ------------------------------------------  --------------------  ----------  ------------------------------------
+  CLIMA_SEMANAL                               ix_periodo            1           periodo                             
+  CLIMA_SEMANAL                               PRIMARY               0           id_clima_sem                        
+  CLIMA_SEMANAL                               uq_regiao_periodo     0           id_regiao,periodo                   
+  CONFIGURACAO_SAFRA                          idx_config_cultura    1           id_cultura                          
+  CONFIGURACAO_SAFRA                          idx_config_regiao     1           id_regiao                           
+  CONFIGURACAO_SAFRA                          idx_config_solo       1           id_solo                             
+  CONFIGURACAO_SAFRA                          PRIMARY               0           id_config                           
+  CULTURA                                     PRIMARY               0           id_cultura                          
+  CULTURA                                     uk_cultura_nome       0           nome_cultura                        
+  DADOS_CLIMATICOS_HISTORICOS                 ix_ano_mes            1           ano_mes                             
+  DADOS_CLIMATICOS_HISTORICOS                 PRIMARY               0           id_clima                            
+  DADOS_CLIMATICOS_HISTORICOS                 uq_regiao_mes         0           id_regiao,ano_mes                   
+  DADOS_CLIMATICOS_HISTORICOS_bkp_20261026_1  idx_clima_ano_mes     1           ano_mes                             
+  DADOS_CLIMATICOS_HISTORICOS_bkp_20261026_1  idx_clima_regiao      1           id_regiao                           
+  DADOS_CLIMATICOS_HISTORICOS_bkp_20261026_1  PRIMARY               0           id_clima                            
+  DADOS_CLIMATICOS_HISTORICOS_bkp_20261026_1  uk_clima_regiao_mes   0           id_regiao,ano_mes                   
+  LEITURA_IOT                                 idx_leitura_config    1           id_config                           
+  LEITURA_IOT                                 idx_leitura_data      1           data_hora                           
+  LEITURA_IOT                                 idx_leitura_sensor    1           id_sensor                           
+  LEITURA_IOT                                 PRIMARY               0           id_leitura                          
+  PONTE_ESTACAO_MUNICIPIO                     ix_municipio          1           cod_municipio_ibge                  
+  PONTE_ESTACAO_MUNICIPIO                     PRIMARY               0           id_ponte                            
+  PONTE_ESTACAO_MUNICIPIO                     uq_regiao_municipio   0           id_regiao,cod_municipio_ibge        
+  PRODUTIVIDADE_OBSERVADA                     ix_uf_safra           1           uf,safra                            
+  PRODUTIVIDADE_OBSERVADA                     PRIMARY               0           id_produtividade                    
+  PRODUTIVIDADE_OBSERVADA                     uq_mun_cultura_safra  0           cod_municipio_ibge,cultura_tcc,safra
+  PRODUTIVIDADE_OBSERVADA_bkp_20261026_15365  idx_prod_cultura      1           cultura_tcc                         
+  PRODUTIVIDADE_OBSERVADA_bkp_20261026_15365  idx_prod_local        1           uf,municipio_ibge                   
+  PRODUTIVIDADE_OBSERVADA_bkp_20261026_15365  idx_prod_safra        1           safra                               
+  PRODUTIVIDADE_OBSERVADA_bkp_20261026_15365  PRIMARY               0           id_produtividade                    
+  REGIAO                                      idx_regiao_cidade     1           cidade                              
+  REGIAO                                      idx_regiao_uf         1           uf                                  
+  REGIAO                                      PRIMARY               0           id_regiao                           
+  REGIAO                                      uk_regiao_estacao     0           uf,cidade,cod_estacao               
+  SENSOR_IOT                                  PRIMARY               0           id_sensor                           
+  TIPO_SOLO                                   PRIMARY               0           id_solo                             
+  TIPO_SOLO                                   uk_tipo_solo          0           nome_solo,ordem_solo,textura        
+
+-- gatilhos (triggers) — onde uma validação de domínio poderia estar
+  TRIGGER_NAME  EVENT_MANIPULATION  EVENT_OBJECT_TABLE  ACTION_TIMING
+  ------------  ------------------  ------------------  -------------
+  (nenhuma linha)
+
+-- visões (views)
+  TABLE_NAME
+  ----------
+  (nenhuma linha)
+
+==============================================================================
+2. DDL COMPLETA (SHOW CREATE TABLE)
+==============================================================================
+  Observação: o MySQL 5.7 descarta cláusulas CHECK ao criar a tabela,
+  então elas NÃO aparecem aqui mesmo que tenham sido escritas. Se não
+  houver trigger acima, não há validação de domínio no banco.
+
+-- BASE_MODELO
+  CREATE TABLE `BASE_MODELO` (
+    `cod_municipio` bigint(20) DEFAULT NULL,
+    `municipio_ibge` text COLLATE latin1_general_ci,
+    `UF` text COLLATE latin1_general_ci,
+    `cultura_tcc` text COLLATE latin1_general_ci,
+    `ano_pam` bigint(20) DEFAULT NULL,
+    `semanas_esperadas` bigint(20) DEFAULT NULL,
+    `semanas_no_ciclo` bigint(20) DEFAULT NULL,
+    `semanas_validas` bigint(20) DEFAULT NULL,
+    `cobertura_ciclo` double DEFAULT NULL,
+    `ciclo_precipitacao_total_mm` double DEFAULT NULL,
+    `ciclo_graus_dia_acum` double DEFAULT NULL,
+    `ciclo_radiacao_total_mjm2` double DEFAULT NULL,
+    `ciclo_dias_com_chuva` double DEFAULT NULL,
+    `ciclo_maior_veranico` double DEFAULT NULL,
+    `ciclo_dias_secos_acumulados` double DEFAULT NULL,
+    `ciclo_temp_media` double DEFAULT NULL,
+    `ciclo_temp_max_abs` double DEFAULT NULL,
+    `ciclo_temp_min_abs` double DEFAULT NULL,
+    `ciclo_amplitude_termica` double DEFAULT NULL,
+    `ciclo_umidade_media` double DEFAULT NULL,
+    `ciclo_umidade_min_abs` double DEFAULT NULL,
+    `ciclo_vpd_medio_kpa` double DEFAULT NULL,
+    `ciclo_vpd_max_kpa` double DEFAULT NULL,
+    `ciclo_pressao_media` double DEFAULT NULL,
+    `ciclo_vento_medio` double DEFAULT NULL,
+    `ciclo_vento_rajada_max` double DEFAULT NULL,
+    `ciclo_cobertura` double DEFAULT NULL,
+    `vegetativo_precipitacao_total_mm` double DEFAULT NULL,
+    `vegetativo_graus_dia_acum` double DEFAULT NULL,
+    `vegetativo_radiacao_total_mjm2` double DEFAULT NULL,
+    `vegetativo_dias_com_chuva` double DEFAULT NULL,
+    `vegetativo_maior_veranico` double DEFAULT NULL,
+    `vegetativo_dias_secos_acumulados` double DEFAULT NULL,
+    `vegetativo_temp_media` double DEFAULT NULL,
+    `vegetativo_temp_max_abs` double DEFAULT NULL,
+    `vegetativo_temp_min_abs` double DEFAULT NULL,
+    `vegetativo_amplitude_termica` double DEFAULT NULL,
+    `vegetativo_umidade_media` double DEFAULT NULL,
+    `vegetativo_umidade_min_abs` double DEFAULT NULL,
+    `vegetativo_vpd_medio_kpa` double DEFAULT NULL,
+    `vegetativo_vpd_max_kpa` double DEFAULT NULL,
+    `vegetativo_pressao_media` double DEFAULT NULL,
+    `vegetativo_vento_medio` double DEFAULT NULL,
+    `vegetativo_vento_rajada_max` double DEFAULT NULL,
+    `vegetativo_cobertura` double DEFAULT NULL,
+    `floracao_precipitacao_total_mm` double DEFAULT NULL,
+    `floracao_graus_dia_acum` double DEFAULT NULL,
+    `floracao_radiacao_total_mjm2` double DEFAULT NULL,
+    `floracao_dias_com_chuva` double DEFAULT NULL,
+    `floracao_maior_veranico` double DEFAULT NULL,
+    `floracao_dias_secos_acumulados` double DEFAULT NULL,
+    `floracao_temp_media` double DEFAULT NULL,
+    `floracao_temp_max_abs` double DEFAULT NULL,
+    `floracao_temp_min_abs` double DEFAULT NULL,
+    `floracao_amplitude_termica` double DEFAULT NULL,
+    `floracao_umidade_media` double DEFAULT NULL,
+    `floracao_umidade_min_abs` double DEFAULT NULL,
+    `floracao_vpd_medio_kpa` double DEFAULT NULL,
+    `floracao_vpd_max_kpa` double DEFAULT NULL,
+    `floracao_pressao_media` double DEFAULT NULL,
+    `floracao_vento_medio` double DEFAULT NULL,
+    `floracao_vento_rajada_max` double DEFAULT NULL,
+    `floracao_cobertura` double DEFAULT NULL,
+    `enchimento_precipitacao_total_mm` double DEFAULT NULL,
+    `enchimento_graus_dia_acum` double DEFAULT NULL,
+    `enchimento_radiacao_total_mjm2` double DEFAULT NULL,
+    `enchimento_dias_com_chuva` double DEFAULT NULL,
+    `enchimento_maior_veranico` double DEFAULT NULL,
+    `enchimento_dias_secos_acumulados` double DEFAULT NULL,
+    `enchimento_temp_media` double DEFAULT NULL,
+    `enchimento_temp_max_abs` double DEFAULT NULL,
+    `enchimento_temp_min_abs` double DEFAULT NULL,
+    `enchimento_amplitude_termica` double DEFAULT NULL,
+    `enchimento_umidade_media` double DEFAULT NULL,
+    `enchimento_umidade_min_abs` double DEFAULT NULL,
+    `enchimento_vpd_medio_kpa` double DEFAULT NULL,
+    `enchimento_vpd_max_kpa` double DEFAULT NULL,
+    `enchimento_pressao_media` double DEFAULT NULL,
+    `enchimento_vento_medio` double DEFAULT NULL,
+    `enchimento_vento_rajada_max` double DEFAULT NULL,
+    `enchimento_cobertura` double DEFAULT NULL,
+    `rendimento_kg_ha` bigint(20) DEFAULT NULL,
+    `rendimento_sacas_ha` double DEFAULT NULL
+  ) ENGINE=InnoDB DEFAULT CHARSET=latin1 COLLATE=latin1_general_ci
+
+-- CLIMA_SEMANAL
+  CREATE TABLE `CLIMA_SEMANAL` (
+    `id_clima_sem` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+    `id_regiao` int(10) unsigned NOT NULL,
+    `periodo` int(10) unsigned NOT NULL COMMENT 'ano ISO * 100 + semana ISO',
+    `periodo_label` varchar(10) NOT NULL COMMENT 'ex. 2023-W07',
+    `data_inicio` date DEFAULT NULL,
+    `data_fim` date DEFAULT NULL,
+    `dias_validos` decimal(12,3) DEFAULT NULL,
+    `dias_no_periodo` decimal(12,3) DEFAULT NULL,
+    `cobertura` decimal(12,3) DEFAULT NULL,
+    `temp_media` decimal(12,3) DEFAULT NULL,
+    `temp_max_media` decimal(12,3) DEFAULT NULL,
+    `temp_min_media` decimal(12,3) DEFAULT NULL,
+    `temp_max_abs` decimal(12,3) DEFAULT NULL,
+    `temp_min_abs` decimal(12,3) DEFAULT NULL,
+    `amplitude_termica` decimal(12,3) DEFAULT NULL,
+    `graus_dia_acum` decimal(12,3) DEFAULT NULL,
+    `precipitacao_total_mm` decimal(12,3) DEFAULT NULL,
+    `dias_com_chuva` decimal(12,3) DEFAULT NULL,
+    `maior_veranico` decimal(12,3) DEFAULT NULL,
+    `dias_secos_acumulados` decimal(12,3) DEFAULT NULL,
+    `umidade_media` decimal(12,3) DEFAULT NULL,
+    `umidade_min_abs` decimal(12,3) DEFAULT NULL,
+    `vpd_medio_kpa` decimal(12,3) DEFAULT NULL,
+    `vpd_max_kpa` decimal(12,3) DEFAULT NULL,
+    `orvalho_medio` decimal(12,3) DEFAULT NULL,
+    `radiacao_total_mjm2` decimal(12,3) DEFAULT NULL,
+    `pressao_media` decimal(12,3) DEFAULT NULL,
+    `vento_medio` decimal(12,3) DEFAULT NULL,
+    `vento_rajada_max` decimal(12,3) DEFAULT NULL,
+    `vento_dir_predom` decimal(12,3) DEFAULT NULL,
+    `vento_dir_consistencia` decimal(12,3) DEFAULT NULL,
+    PRIMARY KEY (`id_clima_sem`),
+    UNIQUE KEY `uq_regiao_periodo` (`id_regiao`,`periodo`),
+    KEY `ix_periodo` (`periodo`),
+    CONSTRAINT `fk_clima_sem_regiao` FOREIGN KEY (`id_regiao`) REFERENCES `REGIAO` (`id_regiao`)
+  ) ENGINE=InnoDB AUTO_INCREMENT=46967 DEFAULT CHARSET=utf8mb4
+
+-- CONFIGURACAO_SAFRA
+  CREATE TABLE `CONFIGURACAO_SAFRA` (
+    `id_config` int(10) unsigned NOT NULL AUTO_INCREMENT,
+    `id_regiao` int(10) unsigned NOT NULL,
+    `id_solo` int(10) unsigned NOT NULL,
+    `id_cultura` int(10) unsigned NOT NULL,
+    `data_plantio` date DEFAULT NULL,
+    PRIMARY KEY (`id_config`),
+    KEY `idx_config_regiao` (`id_regiao`),
+    KEY `idx_config_solo` (`id_solo`),
+    KEY `idx_config_cultura` (`id_cultura`),
+    CONSTRAINT `fk_config_cultura` FOREIGN KEY (`id_cultura`) REFERENCES `CULTURA` (`id_cultura`) ON UPDATE CASCADE,
+    CONSTRAINT `fk_config_regiao` FOREIGN KEY (`id_regiao`) REFERENCES `REGIAO` (`id_regiao`) ON UPDATE CASCADE,
+    CONSTRAINT `fk_config_solo` FOREIGN KEY (`id_solo`) REFERENCES `TIPO_SOLO` (`id_solo`) ON UPDATE CASCADE
+  ) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=latin1 COLLATE=latin1_general_ci
+
+-- CULTURA
+  CREATE TABLE `CULTURA` (
+    `id_cultura` int(10) unsigned NOT NULL AUTO_INCREMENT,
+    `nome_cultura` varchar(150) COLLATE latin1_general_ci NOT NULL,
+    `ciclo_estimado_dias` int(11) DEFAULT NULL,
+    PRIMARY KEY (`id_cultura`),
+    UNIQUE KEY `uk_cultura_nome` (`nome_cultura`)
+  ) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=latin1 COLLATE=latin1_general_ci
+
+-- DADOS_CLIMATICOS_HISTORICOS
+  CREATE TABLE `DADOS_CLIMATICOS_HISTORICOS` (
+    `id_clima` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+    `id_regiao` int(10) unsigned NOT NULL,
+    `ano_mes` date NOT NULL,
+    `precipitacao_total_mm` decimal(12,3) DEFAULT NULL,
+    `graus_dia_acum` decimal(12,3) DEFAULT NULL,
+    `radiacao_total_mjm2` decimal(12,3) DEFAULT NULL,
+    `dias_com_chuva` decimal(12,3) DEFAULT NULL,
+    `dias_validos` decimal(12,3) DEFAULT NULL,
+    `temp_media` decimal(12,3) DEFAULT NULL,
+    `temp_max_media` decimal(12,3) DEFAULT NULL,
+    `temp_min_media` decimal(12,3) DEFAULT NULL,
+    `amplitude_termica` decimal(12,3) DEFAULT NULL,
+    `umidade_media` decimal(12,3) DEFAULT NULL,
+    `vpd_medio_kpa` decimal(12,3) DEFAULT NULL,
+    `orvalho_medio` decimal(12,3) DEFAULT NULL,
+    `pressao_media` decimal(12,3) DEFAULT NULL,
+    `vento_medio` decimal(12,3) DEFAULT NULL,
+    `vento_dir_predom` decimal(12,3) DEFAULT NULL,
+    `vento_dir_consistencia` decimal(12,3) DEFAULT NULL,
+    `temp_max_abs` decimal(12,3) DEFAULT NULL,
+    `maior_veranico` decimal(12,3) DEFAULT NULL,
+    `vento_rajada_max` decimal(12,3) DEFAULT NULL,
+    `temp_min_abs` decimal(12,3) DEFAULT NULL,
+    `umidade_min_abs` decimal(12,3) DEFAULT NULL,
+    `dias_no_mes` decimal(12,3) DEFAULT NULL,
+    `cobertura` decimal(12,3) DEFAULT NULL,
+    PRIMARY KEY (`id_clima`),
+    UNIQUE KEY `uq_regiao_mes` (`id_regiao`,`ano_mes`),
+    KEY `ix_ano_mes` (`ano_mes`),
+    CONSTRAINT `fk_clima_mes_regiao` FOREIGN KEY (`id_regiao`) REFERENCES `REGIAO` (`id_regiao`)
+  ) ENGINE=InnoDB AUTO_INCREMENT=10774 DEFAULT CHARSET=utf8mb4
+
+-- DADOS_CLIMATICOS_HISTORICOS_bkp_20261026_153658
+  CREATE TABLE `DADOS_CLIMATICOS_HISTORICOS_bkp_20261026_153658` (
+    `id_clima` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+    `id_regiao` int(10) unsigned NOT NULL,
+    `ano_mes` date NOT NULL,
+    `dias_validos` smallint(5) unsigned DEFAULT NULL,
+    `dias_no_mes` smallint(5) unsigned DEFAULT NULL,
+    `cobertura` decimal(6,2) DEFAULT NULL,
+    `temp_media` decimal(6,2) DEFAULT NULL,
+    `temp_max_media` decimal(6,2) DEFAULT NULL,
+    `temp_min_media` decimal(6,2) DEFAULT NULL,
+    `temp_max_abs` decimal(6,2) DEFAULT NULL,
+    `temp_min_abs` decimal(6,2) DEFAULT NULL,
+    `amplitude_termica` decimal(6,2) DEFAULT NULL,
+    `graus_dia_acum` decimal(10,2) DEFAULT NULL,
+    `precipitacao_total_mm` decimal(10,2) DEFAULT NULL,
+    `dias_com_chuva` smallint(5) unsigned DEFAULT NULL,
+    `maior_veranico` smallint(5) unsigned DEFAULT NULL,
+    `umidade_media` decimal(6,2) DEFAULT NULL,
+    `umidade_min_abs` decimal(6,2) DEFAULT NULL,
+    `vpd_medio_kpa` decimal(8,3) DEFAULT NULL,
+    `orvalho_medio` decimal(6,2) DEFAULT NULL,
+    `radiacao_total_mjm2` decimal(10,2) DEFAULT NULL,
+    `pressao_media` decimal(8,2) DEFAULT NULL,
+    `vento_medio` decimal(8,2) DEFAULT NULL,
+    `vento_rajada_max` decimal(8,2) DEFAULT NULL,
+    `vento_dir_predom` decimal(8,2) DEFAULT NULL,
+    `vento_dir_consistencia` decimal(8,2) DEFAULT NULL,
+    PRIMARY KEY (`id_clima`),
+    UNIQUE KEY `uk_clima_regiao_mes` (`id_regiao`,`ano_mes`),
+    KEY `idx_clima_regiao` (`id_regiao`),
+    KEY `idx_clima_ano_mes` (`ano_mes`),
+    CONSTRAINT `fk_clima_regiao` FOREIGN KEY (`id_regiao`) REFERENCES `REGIAO` (`id_regiao`) ON UPDATE CASCADE
+  ) ENGINE=InnoDB AUTO_INCREMENT=5457 DEFAULT CHARSET=latin1 COLLATE=latin1_general_ci
+
+-- LEITURA_IOT
+  CREATE TABLE `LEITURA_IOT` (
+    `id_leitura` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+    `id_config` int(10) unsigned NOT NULL,
+    `id_sensor` int(10) unsigned NOT NULL,
+    `temperatura` decimal(6,2) DEFAULT NULL,
+    `umidade_relativa` decimal(6,2) DEFAULT NULL,
+    `data_hora` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id_leitura`),
+    KEY `idx_leitura_config` (`id_config`),
+    KEY `idx_leitura_sensor` (`id_sensor`),
+    KEY `idx_leitura_data` (`data_hora`),
+    CONSTRAINT `fk_leitura_config` FOREIGN KEY (`id_config`) REFERENCES `CONFIGURACAO_SAFRA` (`id_config`) ON UPDATE CASCADE,
+    CONSTRAINT `fk_leitura_sensor` FOREIGN KEY (`id_sensor`) REFERENCES `SENSOR_IOT` (`id_sensor`) ON UPDATE CASCADE
+  ) ENGINE=InnoDB AUTO_INCREMENT=2116 DEFAULT CHARSET=latin1 COLLATE=latin1_general_ci
+
+-- PONTE_ESTACAO_MUNICIPIO
+  CREATE TABLE `PONTE_ESTACAO_MUNICIPIO` (
+    `id_ponte` int(10) unsigned NOT NULL AUTO_INCREMENT,
+    `id_regiao` int(10) unsigned NOT NULL,
+    `cod_municipio_ibge` int(10) unsigned NOT NULL,
+    `municipio_ibge` varchar(150) DEFAULT NULL,
+    `metodo` varchar(30) NOT NULL COMMENT 'exato | abreviacao | aproximado',
+    `escore` decimal(5,3) DEFAULT NULL COMMENT 'similaridade, 1 = correspondencia exata',
+    PRIMARY KEY (`id_ponte`),
+    UNIQUE KEY `uq_regiao_municipio` (`id_regiao`,`cod_municipio_ibge`),
+    KEY `ix_municipio` (`cod_municipio_ibge`),
+    CONSTRAINT `fk_ponte_regiao` FOREIGN KEY (`id_regiao`) REFERENCES `REGIAO` (`id_regiao`)
+  ) ENGINE=InnoDB AUTO_INCREMENT=184 DEFAULT CHARSET=utf8mb4
+
+-- PRODUTIVIDADE_OBSERVADA
+  CREATE TABLE `PRODUTIVIDADE_OBSERVADA` (
+    `id_produtividade` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+    `cod_municipio_ibge` int(10) unsigned NOT NULL,
+    `municipio_ibge` varchar(150) DEFAULT NULL,
+    `uf` char(2) NOT NULL,
+    `cultura_tcc` varchar(100) NOT NULL,
+    `safra` smallint(5) unsigned NOT NULL COMMENT 'ano da safra PAM',
+    `rendimento_kg_ha` decimal(12,2) DEFAULT NULL,
+    `rendimento_sacas_ha` decimal(10,2) DEFAULT NULL,
+    PRIMARY KEY (`id_produtividade`),
+    UNIQUE KEY `uq_mun_cultura_safra` (`cod_municipio_ibge`,`cultura_tcc`,`safra`),
+    KEY `ix_uf_safra` (`uf`,`safra`)
+  ) ENGINE=InnoDB AUTO_INCREMENT=32980 DEFAULT CHARSET=utf8mb4
+
+-- PRODUTIVIDADE_OBSERVADA_bkp_20261026_153658
+  CREATE TABLE `PRODUTIVIDADE_OBSERVADA_bkp_20261026_153658` (
+    `id_produtividade` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+    `cod_municipio_ibge` int(10) unsigned DEFAULT NULL,
+    `municipio_ibge` varchar(150) COLLATE latin1_general_ci DEFAULT NULL,
+    `uf` char(2) COLLATE latin1_general_ci NOT NULL,
+    `cultura_tcc` varchar(100) COLLATE latin1_general_ci NOT NULL,
+    `safra` varchar(20) COLLATE latin1_general_ci DEFAULT NULL,
+    `rendimento_kg_ha` decimal(12,2) DEFAULT NULL,
+    `rendimento_sacas_ha` decimal(10,2) DEFAULT NULL,
+    PRIMARY KEY (`id_produtividade`),
+    KEY `idx_prod_local` (`uf`,`municipio_ibge`),
+    KEY `idx_prod_cultura` (`cultura_tcc`),
+    KEY `idx_prod_safra` (`safra`)
+  ) ENGINE=InnoDB AUTO_INCREMENT=44302 DEFAULT CHARSET=latin1 COLLATE=latin1_general_ci
+
+-- REGIAO
+  CREATE TABLE `REGIAO` (
+    `id_regiao` int(10) unsigned NOT NULL AUTO_INCREMENT,
+    `uf` char(2) COLLATE latin1_general_ci NOT NULL,
+    `cidade` varchar(150) COLLATE latin1_general_ci NOT NULL,
+    `cod_estacao` varchar(50) COLLATE latin1_general_ci DEFAULT NULL,
+    PRIMARY KEY (`id_regiao`),
+    UNIQUE KEY `uk_regiao_estacao` (`uf`,`cidade`,`cod_estacao`),
+    KEY `idx_regiao_uf` (`uf`),
+    KEY `idx_regiao_cidade` (`cidade`)
+  ) ENGINE=InnoDB AUTO_INCREMENT=185 DEFAULT CHARSET=latin1 COLLATE=latin1_general_ci
+
+-- SENSOR_IOT
+  CREATE TABLE `SENSOR_IOT` (
+    `id_sensor` int(10) unsigned NOT NULL AUTO_INCREMENT,
+    `modelo` varchar(100) COLLATE latin1_general_ci NOT NULL,
+    `fabricante` varchar(100) COLLATE latin1_general_ci DEFAULT NULL,
+    `protocolo_comunicacao` varchar(50) COLLATE latin1_general_ci DEFAULT NULL,
+    `frequencia_amostragem_min` int(10) unsigned DEFAULT NULL,
+    `status_operacional` varchar(30) COLLATE latin1_general_ci DEFAULT NULL,
+    PRIMARY KEY (`id_sensor`)
+  ) ENGINE=InnoDB DEFAULT CHARSET=latin1 COLLATE=latin1_general_ci
+
+-- TIPO_SOLO
+  CREATE TABLE `TIPO_SOLO` (
+    `id_solo` int(10) unsigned NOT NULL AUTO_INCREMENT,
+    `nome_solo` varchar(150) COLLATE latin1_general_ci NOT NULL,
+    `ordem_solo` varchar(100) COLLATE latin1_general_ci DEFAULT NULL,
+    `textura` varchar(100) COLLATE latin1_general_ci DEFAULT NULL,
+    `fonte` varchar(255) COLLATE latin1_general_ci DEFAULT NULL,
+    `retencao_agua` tinyint(3) unsigned DEFAULT NULL,
+    `drenagem` tinyint(3) unsigned DEFAULT NULL,
+    `aptidao_graos` tinyint(3) unsigned DEFAULT NULL,
+    `profundidade` tinyint(3) unsigned DEFAULT NULL,
+    `risco_erosao` tinyint(3) unsigned DEFAULT NULL,
+    `culturas_predominantes` varchar(255) COLLATE latin1_general_ci DEFAULT NULL,
+    `descricao` text COLLATE latin1_general_ci,
+    PRIMARY KEY (`id_solo`),
+    UNIQUE KEY `uk_tipo_solo` (`nome_solo`,`ordem_solo`,`textura`)
+  ) ENGINE=InnoDB AUTO_INCREMENT=11 DEFAULT CHARSET=latin1 COLLATE=latin1_general_ci
+
+==============================================================================
+3. PRODUTIVIDADE_OBSERVADA — o alvo do modelo
+==============================================================================
+
+-- valores distintos de safra
+  safra  linhas
+  -----  ------
+  2016   3571  
+  2017   3594  
+  2018   3584  
+  2019   3617  
+  2020   3634  
+  2021   3696  
+  2022   3741  
+  2023   3790  
+  2024   3752  
+
+-- culturas gravadas
+  cultura_tcc      linhas
+  ---------------  ------
+  Milho (em grão)  14238 
+  Soja (em grão)   12332 
+  Trigo (em grão)  6409  
+
+-- por UF e cultura
+  uf  cultura_tcc      linhas  municipios  min_sc  media_sc  max_sc
+  --  ---------------  ------  ----------  ------  --------  ------
+  MT  Milho (em grão)  1241    141         20.0    89.2      139.3 
+  MT  Soja (em grão)   1121    134         30.0    55.6      76.7  
+  MT  Trigo (em grão)  5       3           17.0    36.3      58.3  
+  PR  Milho (em grão)  3546    397         4.0     93.2      225.8 
+  PR  Soja (em grão)   3445    392         5.0     53.2      90.0  
+  PR  Trigo (em grão)  2708    336         4.2     42.4      90.6  
+  RS  Milho (em grão)  4384    492         4.8     89.7      450.0 
+  RS  Soja (em grão)   3832    443         1.8     45.6      79.8  
+  RS  Trigo (em grão)  3119    393         4.8     42.6      81.7  
+  SP  Milho (em grão)  5067    588         16.7    83.8      200.0 
+  SP  Soja (em grão)   3934    512         2.5     51.1      127.8 
+  SP  Trigo (em grão)  577     106         8.2     45.7      100.0 
+
+-- quantas linhas cada (município, cultura) tem — se o ano se perdeu, isto mostra quantos anos há escondidos
+  linhas_por_mun_cultura  combinacoes
+  ----------------------  -----------
+  1                       84         
+  2                       68         
+  3                       56         
+  4                       63         
+  5                       38         
+  6                       66         
+  7                       78         
+  8                       149        
+  9                       3335       
+
+-- linhas EXATAMENTE repetidas (mesmo município, cultura, safra e rendimento)
+  grupos_repetidos  linhas_excedentes
+  ----------------  -----------------
+  0                 0                
+
+-- faixa de id_produtividade (lacunas indicam apagamentos ou cargas múltiplas)
+  min_id  max_id  linhas  ids_faltando
+  ------  ------  ------  ------------
+  1       32979   32979   0           
+
+-- conferência kg/ha -> sacas/ha (60 kg por saca)
+  linhas_que_nao_batem  rendimento_zero_ou_negativo
+  --------------------  ---------------------------
+  0                     0                          
+
+-- as 5 combinações (município, cultura) com mais linhas
+  cod_municipio_ibge  municipio_ibge  cultura_tcc      n
+  ------------------  --------------  ---------------  -
+  3543808             Rinópolis       Milho (em grão)  9
+  3507456             Borebi          Soja (em grão)   9
+  4100608             Alto Paraná     Soja (em grão)   9
+  4100608             Alto Paraná     Milho (em grão)  9
+  4107520             Esperança Nova  Milho (em grão)  9
+
+-- linhas de 3543808 / Milho (em grão), na ordem de inserção (a ordem do id revela a ordem dos anos?)
+  id_produtividade  safra  rendimento_kg_ha  rendimento_sacas_ha
+  ----------------  -----  ----------------  -------------------
+  31215             2016   3000.00           50.00              
+  31216             2017   6000.00           100.00             
+  31217             2018   3000.00           50.00              
+  31218             2019   3500.00           58.33              
+  31219             2020   3500.00           58.33              
+  31220             2021   3000.00           50.00              
+  31221             2022   3500.00           58.33              
+  31222             2023   4500.00           75.00              
+  31223             2024   2050.00           34.17              
+
+-- linhas de 5100102 / Milho (em grão), na ordem de inserção (a ordem do id revela a ordem dos anos?)
+  id_produtividade  safra  rendimento_kg_ha  rendimento_sacas_ha
+  ----------------  -----  ----------------  -------------------
+  1122              2016   2700.00           45.00              
+  1123              2017   2700.00           45.00              
+  1124              2018   1200.00           20.00              
+  1125              2019   1200.00           20.00              
+
+-- nulos por coluna em PRODUTIVIDADE_OBSERVADA (total 32979 linhas; colunas sem nulo omitidas)
+  nenhuma coluna com nulo
+
+==============================================================================
+4. DADOS_CLIMATICOS_HISTORICOS — o clima que está no banco
+==============================================================================
+
+-- período coberto
+  primeiro_mes  ultimo_mes  linhas  estacoes
+  ------------  ----------  ------  --------
+  2020-01-01    2025-12-01  10773   183     
+
+-- por ano
+  ano   linhas  estacoes  cobertura_media  meses_cobertura_menor_80
+  ----  ------  --------  ---------------  ------------------------
+  2020  1800    150       0.746            456                     
+  2021  1788    149       0.512            874                     
+  2022  1729    145       0.672            577                     
+  2023  1788    149       0.855            223                     
+  2024  1776    148       0.791            358                     
+  2025  1892    177       0.641            700                     
+
+-- por UF
+  uf  linhas  estacoes  de          ate       
+  --  ------  --------  ----------  ----------
+  MT  2721    45        2020-01-01  2025-12-01
+  PR  1848    26        2020-01-01  2025-12-01
+  RS  3300    70        2020-01-01  2025-12-01
+  SP  2904    42        2020-01-01  2025-12-01
+
+-- (estação, mês) repetidos
+  grupos_repetidos
+  ----------------
+  0               
+
+-- estações de REGIAO sem nenhum mês de clima
+  uf  estacoes_sem_clima
+  --  ------------------
+  SP  1                 
+
+-- id_regiao no clima que não existe em REGIAO (órfãos)
+  linhas_orfas
+  ------------
+  0           
+
+-- valores fisicamente suspeitos
+  chuva_negativa  graus_dia_zero  radiacao_zero  tmax_acima_50  tmin_abaixo_menos15  umidade_fora  cobertura_acima_1
+  --------------  --------------  -------------  -------------  -------------------  ------------  -----------------
+  0               0               1              0              0                    0             0                
+
+-- nulos por coluna em DADOS_CLIMATICOS_HISTORICOS (total 10773 linhas; colunas sem nulo omitidas)
+  precipitacao_total_mm                 3,230 ( 30.0%)
+  graus_dia_acum                        2,578 ( 23.9%)
+  radiacao_total_mjm2                   2,707 ( 25.1%)
+  dias_com_chuva                        2,578 ( 23.9%)
+  temp_media                            2,578 ( 23.9%)
+  temp_max_media                        2,578 ( 23.9%)
+  temp_min_media                        2,578 ( 23.9%)
+  amplitude_termica                     2,578 ( 23.9%)
+  umidade_media                         2,784 ( 25.8%)
+  vpd_medio_kpa                         2,784 ( 25.8%)
+  orvalho_medio                         2,785 ( 25.9%)
+  pressao_media                         2,595 ( 24.1%)
+  vento_medio                           2,980 ( 27.7%)
+  vento_dir_predom                      3,011 ( 27.9%)
+  vento_dir_consistencia                3,011 ( 27.9%)
+  temp_max_abs                          2,578 ( 23.9%)
+  maior_veranico                        2,578 ( 23.9%)
+  vento_rajada_max                      2,967 ( 27.5%)
+  temp_min_abs                          2,578 ( 23.9%)
+  umidade_min_abs                       2,786 ( 25.9%)
+
+-- colunas que o modelo usa e que NÃO existem nesta tabela
+  ['dias_secos_acumulados', 'vpd_max_kpa']
+  (lista = AGREGACAO_CICLO do notebook alvo_produtividade_5)
+
+==============================================================================
+5. REGIAO — estações
+==============================================================================
+
+-- por UF
+  uf  estacoes  sem_codigo
+  --  --------  ----------
+  MT  45        0         
+  PR  26        0         
+  RS  70        0         
+  SP  43        0         
+
+-- cod_estacao repetido
+  cod_estacao  n
+  -----------  -
+  A713         2
+
+-- lista completa (é a base de uma ponte estação -> município)
+  id_regiao  uf  cidade                                     cod_estacao
+  ---------  --  -----------------------------------------  -----------
+  116        MT  AGUA BOA                                   A908       
+  131        MT  ALTA FLORESTA                              A924       
+  117        MT  ALTO ARAGUAIA                              A909       
+  140        MT  ALTO TAQUARI                               A934       
+  118        MT  APIACAS                                    A910       
+  147        MT  BARRA DO GARCAS                            A945       
+  133        MT  BRASNORTE (NOVO MUNDO)                     A927       
+  184        MT  CACERES                                    A941       
+  113        MT  CAMPO NOVO DOS PARECIS                     A905       
+  120        MT  CAMPO VERDE                                A912       
+  132        MT  CARLINDA                                   A926       
+  151        MT  COCALINHO                                  A954       
+  121        MT  COMODORO                                   A913       
+  126        MT  COTRIGUACU                                 A919       
+  109        MT  CUIABA                                     A901       
+  149        MT  DIAMANTINO                                 A949       
+  136        MT  GAUCHA DO NORTE                            A930       
+  114        MT  GUARANTA DO NORTE                          A906       
+  138        MT  GUIRATINGA                                 A932       
+  150        MT  ITANHANGA                                  A950       
+  139        MT  ITIQUIRA                                   A933       
+  122        MT  JUARA                                      A914       
+  127        MT  JUINA                                      A920       
+  152        MT  LUCAS DO RIO VERDE                         A955       
+  134        MT  NOVA MARINGA                               A928       
+  135        MT  NOVA UBIRATA                               A929       
+  148        MT  NOVO SANTO ANTONIO                         A947       
+  123        MT  PARANATINGA                                A915       
+  143        MT  PONTES E LACERDA                           A937       
+  141        MT  PORTO ESTRELA                              A935       
+  130        MT  PRIMAVERA DO LESTE                         A923       
+  124        MT  QUERENCIA                                  A916       
+  115        MT  RONDONOPOLIS                               A907       
+  146        MT  ROSARIO OESTE                              A944       
+  111        MT  S.J. DO RIO CLARO                          A903       
+  142        MT  SALTO DO CEU                               A936       
+  137        MT  SANTO ANTONIO DO LESTE                     A931       
+  128        MT  SAO FELIX DO ARAGUAIA                      A921       
+  144        MT  SAO JOSE DO XINGU                          A942       
+  119        MT  SAPEZAL                                    A911       
+  145        MT  SERRA NOVA DOURADA                         A943       
+  125        MT  SINOP                                      A917       
+  112        MT  SORRISO                                    A904       
+  110        MT  TANGARA DA SERRA                           A902       
+  129        MT  VILA BELA DA SANTISSIMA TRINDADE           A922       
+  153        PR  CAMPINA DA LAGOA                           B803       
+  55         PR  CASTRO                                     A819       
+  88         PR  CIDADE GAUCHA                              A869       
+  94         PR  CLEVELANDIA                                A876       
+  155        PR  COLOMBO                                    B806       
+  47         PR  CURITIBA                                   A807       
+  81         PR  DIAMANTE DO NORTE                          A849       
+  78         PR  DOIS VIZINHOS                              A843       
+  80         PR  FOZ DO IGUACU                              A846       
+  93         PR  GENERAL CARNEIRO                           A875       
+  61         PR  GOIOERE                                    A825       
+  60         PR  ICARAIMA                                   A824       
+  59         PR  INACIO MARTINS                             A823       
+  54         PR  IVAI                                       A818       
+  89         PR  JAPIRA                                     A871       
+  57         PR  JOAQUIM TAVORA                             A821       
+  154        PR  LARANJEIRAS DO SUL                         B804       
+  56         PR  MAL. CANDIDO RONDON                        A820       
+  71         PR  MARINGA                                    A835       
+  91         PR  MORRETES                                   A873       
+  77         PR  NOVA FATIMA                                A842       
+  58         PR  NOVA TEBAS                                 A822       
+  82         PR  PARANAPOEMA                                A850       
+  86         PR  PLANALTO                                   A855       
+  92         PR  SAO MATEUS DO SUL                          A874       
+  90         PR  VENTANIA                                   A872       
+  175        RS  ACEGUA                                     B828       
+  62         RS  ALEGRETE                                   A826       
+  63         RS  BAGE                                       A827       
+  174        RS  BAGE - CENTRO                              B827       
+  76         RS  BENTO GONCALVES                            A840       
+  52         RS  CACAPAVA DO SUL                            A812       
+  170        RS  CACHOEIRA DO SUL                           B822       
+  157        RS  CACHOEIRINHA                               B808       
+  74         RS  CAMAQUA                                    A838       
+  107        RS  CAMBARA DO SUL                             A897       
+  101        RS  CAMPO BOM                                  A884       
+  96         RS  CANELA                                     A879       
+  51         RS  CANGUCU                                    A811       
+  178        RS  CAPAO DA CANOA                             B832       
+  103        RS  CAPAO DO LEAO (PELOTAS)                    A887       
+  166        RS  CAXIAS DO SUL - AEROPORTO                  B818       
+  165        RS  CAXIAS DO SUL - CRIUVA                     B817       
+  161        RS  CHARQUEADAS                                B812       
+  84         RS  CRUZ ALTA                                  A853       
+  98         RS  DOM PEDRITO                                A881       
+  105        RS  ENCRUZILHADA DO SUL                        A893       
+  64         RS  ERECHIM                                    A828       
+  85         RS  FREDERICO WESTPHALEN                       A854       
+  173        RS  HERVAL                                     B826       
+  100        RS  IBIRUBA                                    A883       
+  72         RS  JAGUARAO                                   A836       
+  79         RS  LAGOA VERMELHA                             A844       
+  162        RS  MINAS DO LEAO                              B813       
+  163        RS  MONTENEGRO                                 B814       
+  95         RS  MOSTARDAS                                  A878       
+  179        RS  PALMARES DO SUL                            B836       
+  87         RS  PALMEIRA DAS MISSOES                       A856       
+  159        RS  PARQUE ELDORADO                            B810       
+  75         RS  PASSO FUNDO                                A839       
+  171        RS  PINHEIRO MACHADO                           B823       
+  156        RS  PORTO ALEGRE - BELEM NOVO                  B807       
+  172        RS  PORTO ALEGRE - BELEM NOVO                  B825       
+  42         RS  PORTO ALEGRE - JARDIM BOTANICO             A801       
+  67         RS  QUARAI                                     A831       
+  43         RS  RIO GRANDE                                 A802       
+  53         RS  RIO PARDO                                  A813       
+  167        RS  ROLANTE                                    B819       
+  44         RS  SANTA MARIA                                A803       
+  164        RS  SANTA MARIA DO HERVAL                      B816       
+  50         RS  SANTA ROSA                                 A810       
+  177        RS  SANTA VITORIA DO PALMAR (CENTRO)           B830       
+  176        RS  SANTA VITORIA DO PALMAR (RESERVA DO TAIM)  B829       
+  108        RS  SANTA VITORIA DO PALMAR - BARRA DO CHUI    A899       
+  169        RS  SANTANA DA BOA VISTA                       B821       
+  45         RS  SANTANA DO LIVRAMENTO                      A804       
+  69         RS  SANTIAGO                                   A833       
+  180        RS  SANTO ANTONIO DA PATRULHA                  B839       
+  46         RS  SANTO AUGUSTO                              A805       
+  66         RS  SAO BORJA                                  A830       
+  168        RS  SAO FRANCISCO DE PAULA                     B820       
+  68         RS  SAO GABRIEL                                A832       
+  65         RS  SAO JOSE DOS AUSENTES                      A829       
+  83         RS  SAO LUIZ GONZAGA                           A852       
+  104        RS  SAO VICENTE DO SUL                         A889       
+  158        RS  SAPUCAIA DO SUL                            B809       
+  106        RS  SERAFINA CORREA                            A894       
+  160        RS  SERTAO SANTANA                             B811       
+  73         RS  SOLEDADE                                   A837       
+  99         RS  TEUTONIA                                   A882       
+  48         RS  TORRES                                     A808       
+  181        RS  TORRES                                     B841       
+  70         RS  TRAMANDAI                                  A834       
+  102        RS  TUPANCIRETA                                A886       
+  49         RS  URUGUAIANA                                 A809       
+  97         RS  VACARIA                                    A880       
+  21         SP  ARIRANHA                                   A736       
+  14         SP  AVARE                                      A725       
+  26         SP  BARRA BONITA                               A741       
+  28         SP  BARRA DO TURVO                             A746       
+  30         SP  BARRETOS                                   A748       
+  32         SP  BARUERI                                    A755       
+  2          SP  BAURU                                      A705       
+  35         SP  BEBEDOURO                                  A764       
+  36         SP  BERTIOGA                                   A765       
+  27         SP  BRAGANCA PAULISTA                          A744       
+  39         SP  CACHOEIRA PAULISTA                         A769       
+  3          SP  CAMPOS DO JORDAO                           A706       
+  23         SP  CASA BRANCA                                A738       
+  33         SP  DRACENA                                    A762       
+  5          SP  FRANCA                                     A708       
+  22         SP  IBITINGA                                   A737       
+  7          SP  IGUAPE                                     A712       
+  9          SP  IPERO                                      A713       
+  10         SP  ITAPEVA                                    A714       
+  24         SP  ITAPIRA                                    A739       
+  31         SP  ITUVERAVA                                  A753       
+  18         SP  JALES                                      A733       
+  20         SP  JOSE BONIFACIO                             A735       
+  16         SP  LINS                                       A727       
+  34         SP  MARILIA                                    A763       
+  12         SP  OURINHOS                                   A716       
+  15         SP  PIRACICABA                                 A726       
+  29         SP  PRADOPOLIS                                 A747       
+  4          SP  PRESIDENTE PRUDENTE                        A707       
+  13         SP  RANCHARIA                                  A718       
+  37         SP  REGISTRO                                   A766       
+  6          SP  SAO CARLOS                                 A711       
+  25         SP  SAO LUIZ DO PARAITINGA                     A740       
+  11         SP  SAO MIGUEL ARCANJO                         A715       
+  41         SP  SAO PAULO - INTERLAGOS                     A771       
+  1          SP  SAO PAULO - MIRANTE                        A701       
+  183        SP  SAO SEBASTIAO                              A767       
+  40         SP  SAO SIMAO                                  A770       
+  8          SP  SOROCABA                                   A713       
+  17         SP  TAUBATE                                    A728       
+  38         SP  TUPA                                       A768       
+  19         SP  VALPARAISO                                 A734       
+  182        SP  VOTUPORANGA                                A729       
+
+-- quantas estações casam com um município da PAM só pelo nome
+   (normalização simples: sem acento, caixa alta; sem abreviação nem
+    aproximação — o notebook do alvo faz mais que isto)
+  casam direto : 171 de 184
+  não casam    : 13
+     MT  BRASNORTE (NOVO MUNDO)
+     MT  CAMPO NOVO DOS PARECIS
+     MT  S.J. DO RIO CLARO
+     PR  MAL. CANDIDO RONDON
+     RS  CACHOEIRINHA
+     RS  CAPAO DO LEAO (PELOTAS)
+     RS  PARQUE ELDORADO
+     RS  SANTA VITORIA DO PALMAR (CENTRO)
+     RS  SANTA VITORIA DO PALMAR (RESERVA DO TAIM)
+     RS  SANTANA DO LIVRAMENTO
+     SP  BARUERI
+     SP  BERTIOGA
+     SP  SAO SEBASTIAO
+
+==============================================================================
+6. CATÁLOGOS E CONFIGURAÇÃO
+==============================================================================
+
+-- CULTURA
+  id_cultura  nome_cultura  ciclo_estimado_dias
+  ----------  ------------  -------------------
+  1           Milho         120                
+  2           Soja          115                
+  3           Trigo         130                
+
+-- TIPO_SOLO (completo — pendência do seletor de solo)
+  id_solo  nome_solo                   ordem_solo   textura            fonte  retencao_agua  drenagem  aptidao_graos  profundidade  risco_erosao  culturas_predominantes          descricao                                                                       
+  -------  --------------------------  -----------  -----------------  -----  -------------  --------  -------------  ------------  ------------  ------------------------------  --------------------------------------------------------------------------------
+  1        Latossolo Vermelho          Latossolo    Argilosa           NULL   4              5         5              5             1             Soja, Milho, Trigo              Solo profundo e bem drenado. Excelente retenção de nutrientes, ideal para grãos.
+  2        Latossolo Amarelo           Latossolo    Média/Argilosa     NULL   4              5         4              5             1             Soja, Milho                     Solo profundo, exige correção com calcário para alta produtividade de grãos.    
+  3        Argissolo Vermelho-Amarelo  Argissolo    Média/Argilosa     NULL   3              4         4              4             4             Trigo, Milho, Pastagem          Gradiente textural. Bom para trigo no Sul, mas exige cuidado com erosão.        
+  4        Neossolo Quartzarênico      Neossolo     Arenosa            NULL   1              5         2              4             3             Soja (com irrigação), Pastagem  Arenoso e muito drenado. Exige irrigação e manejo de precisão para grãos.       
+  5        Cambissolo Háplico          Cambissolo   Diferenciada       NULL   3              3         2              2             4             Trigo, Pastagem                 Raso e acidentado. Uso restrito para agricultura mecanizada.                    
+  6        Vertissolo Háplico          Vertissolo   Muito Argilosa     NULL   5              2         3              3             3             Arroz irrigado, Soja            Argiloso, racha no seco e alaga na chuva. Exige manejo específico.              
+  7        Neossolo Litólico           Neossolo     Rasa/Diferenciada  NULL   1              4         1              1             5             Pastagem nativa                 Muito raso, com rochas. Inadequado para agricultura intensiva de grãos.         
+  8        Gleissolo Háplico           Gleissolo    Argilosa/Siltosa   NULL   5              1         2              3             1             Arroz irrigado                  Hidromórfico, frequentemente alagado. Condição ideal para arroz irrigado.       
+  9        Espodossolo Ferrocárbico    Espodossolo  Arenosa            NULL   1              5         1              4             2             Pastagem                        Arenoso e pobre em nutrientes. Baixa aptidão para grãos sem alto investimento.  
+  10       Plintossolo Argilúvico      Plintossolo  Média/Argilosa     NULL   3              2         2              3             3             Pastagem, Arroz                 Restrição temporária de drenagem. Uso limitado para culturas de sequeiro.       
+
+-- CONFIGURACAO_SAFRA com os nomes resolvidos
+  id_config  data_plantio  id_regiao  uf  cidade               cod_estacao  nome_cultura  ciclo_estimado_dias  colheita_por_ciclo  nome_solo         
+  ---------  ------------  ---------  --  -------------------  -----------  ------------  -------------------  ------------------  ------------------
+  2          2026-09-21    1          SP  SAO PAULO - MIRANTE  A701         Milho         120                  2027-01-19          Latossolo Vermelho
+  3          2026-10-30    131        MT  ALTA FLORESTA        A924         Soja          115                  2027-02-22          Cambissolo Háplico
+
+-- SENSOR_IOT
+  id_sensor  modelo  fabricante  protocolo_comunicacao  frequencia_amostragem_min  status_operacional
+  ---------  ------  ----------  ---------------------  -------------------------  ------------------
+  0          ESP32   Espressif   ESP-NOW/MQTT           5                          ATIVO             
+
+==============================================================================
+7. LEITURA_IOT — leituras do nó sensor
+==============================================================================
+
+-- janela e chaves
+  leituras  primeira             ultima               sensores  configs
+  --------  -------------------  -------------------  --------  -------
+  726       2026-10-05 19:30:14  2026-10-22 23:30:48  1         1      
+
+-- por dia
+  dia         leituras  tmin  tmax  umin  umax
+  ----------  --------  ----  ----  ----  ----
+  2026-10-05  718       23.4  28.6  60.9  89.7
+  2026-10-22  8         21.7  23.1  76.5  81.0
+
+-- fora da faixa do DHT22 (temp -40..80 °C, umidade 0..100 %)
+  temp_fora  umid_fora
+  ---------  ---------
+  0          0        
+
+-- intervalo entre leituras consecutivas (medido)
+  mediana 5.0 s | mínimo 5.0 s | máximo 1464033.0 s
+  intervalos > 60 s (falhas de coleta): 2
+  intervalos = 0 s (leitura duplicada): 0
+
+-- nulos por coluna em LEITURA_IOT (total 726 linhas; colunas sem nulo omitidas)
+  nenhuma coluna com nulo
+
+==============================================================================
+8. TABELA NÃO ESPERADA: BASE_MODELO
+==============================================================================
+
+-- amostra
+  cod_municipio  municipio_ibge  UF  cultura_tcc     ano_pam  semanas_esperadas  semanas_no_ciclo  semanas_validas  cobertura_ciclo  ciclo_precipitacao_total_mm  ciclo_graus_dia_acum  ciclo_radiacao_total_mjm2  ciclo_dias_com_chuva  ciclo_maior_veranico  ciclo_dias_secos_acumulados  ciclo_temp_media  ciclo_temp_max_abs  ciclo_temp_min_abs  ciclo_amplitude_termica  ciclo_umidade_media  ciclo_umidade_min_abs  ciclo_vpd_medio_kpa  ciclo_vpd_max_kpa  ciclo_pressao_media  ciclo_vento_medio  ciclo_vento_rajada_max  ciclo_cobertura  vegetativo_precipitacao_total_mm  vegetativo_graus_dia_acum  vegetativo_radiacao_total_mjm2  vegetativo_dias_com_chuva  vegetativo_maior_veranico  vegetativo_dias_secos_acumulados  vegetativo_temp_media  vegetativo_temp_max_abs  vegetativo_temp_min_abs  vegetativo_amplitude_termica  vegetativo_umidade_media  vegetativo_umidade_min_abs  vegetativo_vpd_medio_kpa  vegetativo_vpd_max_kpa  vegetativo_pressao_media  vegetativo_vento_medio  vegetativo_vento_rajada_max  vegetativo_cobertura  floracao_precipitacao_total_mm  floracao_graus_dia_acum  floracao_radiacao_total_mjm2  floracao_dias_com_chuva  floracao_maior_veranico  floracao_dias_secos_acumulados  floracao_temp_media  floracao_temp_max_abs  floracao_temp_min_abs  floracao_amplitude_termica  floracao_umidade_media  floracao_umidade_min_abs  floracao_vpd_medio_kpa  floracao_vpd_max_kpa  floracao_pressao_media  floracao_vento_medio  floracao_vento_rajada_max  floracao_cobertura  enchimento_precipitacao_total_mm  enchimento_graus_dia_acum  enchimento_radiacao_total_mjm2  enchimento_dias_com_chuva  enchimento_maior_veranico  enchimento_dias_secos_acumulados  enchimento_temp_media  enchimento_temp_max_abs  enchimento_temp_min_abs  enchimento_amplitude_termica  enchimento_umidade_media  enchimento_umidade_min_abs  enchimento_vpd_medio_kpa  enchimento_vpd_max_kpa  enchimento_pressao_media  enchimento_vento_medio  enchimento_vento_rajada_max  enchimento_cobertura  rendimento_kg_ha  rendimento_sacas_ha
+  -------------  --------------  --  --------------  -------  -----------------  ----------------  ---------------  ---------------  ---------------------------  --------------------  -------------------------  --------------------  --------------------  ---------------------------  ----------------  ------------------  ------------------  -----------------------  -------------------  ---------------------  -------------------  -----------------  -------------------  -----------------  ----------------------  ---------------  --------------------------------  -------------------------  ------------------------------  -------------------------  -------------------------  --------------------------------  ---------------------  -----------------------  -----------------------  ----------------------------  ------------------------  --------------------------  ------------------------  ----------------------  ------------------------  ----------------------  ---------------------------  --------------------  ------------------------------  -----------------------  ----------------------------  -----------------------  -----------------------  ------------------------------  -------------------  ---------------------  ---------------------  --------------------------  ----------------------  ------------------------  ----------------------  --------------------  ----------------------  --------------------  -------------------------  ------------------  --------------------------------  -------------------------  ------------------------------  -------------------------  -------------------------  --------------------------------  ---------------------  -----------------------  -----------------------  ----------------------------  ------------------------  --------------------------  ------------------------  ----------------------  ------------------------  ----------------------  ---------------------------  --------------------  ----------------  -------------------
+  5100201        Água Boa        MT  Soja (em grão)  2021     22                 22                0                0.000            NULL                         NULL                  NULL                       NULL                  NULL                  NULL                         NULL              NULL                NULL                NULL                     NULL                 NULL                   NULL                 NULL               NULL                 NULL               NULL                    0.000            NULL                              NULL                       NULL                            NULL                       NULL                       NULL                              NULL                   NULL                     NULL                     NULL                          NULL                      NULL                        NULL                      NULL                    NULL                      NULL                    NULL                         0.000                 NULL                            NULL                     NULL                          NULL                     NULL                     NULL                            NULL                 NULL                   NULL                   NULL                        NULL                    NULL                      NULL                    NULL                  NULL                    NULL                  NULL                       0.000               NULL                              NULL                       NULL                            NULL                       NULL                       NULL                              NULL                   NULL                     NULL                     NULL                          NULL                      NULL                        NULL                      NULL                    NULL                      NULL                    NULL                         0.000                 3480              58.000             
+  5100250        Alta Floresta   MT  Soja (em grão)  2021     22                 22                0                0.000            NULL                         NULL                  NULL                       NULL                  NULL                  NULL                         NULL              NULL                NULL                NULL                     NULL                 NULL                   NULL                 NULL               NULL                 NULL               NULL                    0.000            NULL                              NULL                       NULL                            NULL                       NULL                       NULL                              NULL                   NULL                     NULL                     NULL                          NULL                      NULL                        NULL                      NULL                    NULL                      NULL                    NULL                         0.000                 NULL                            NULL                     NULL                          NULL                     NULL                     NULL                            NULL                 NULL                   NULL                   NULL                        NULL                    NULL                      NULL                    NULL                  NULL                    NULL                  NULL                       0.000               NULL                              NULL                       NULL                            NULL                       NULL                       NULL                              NULL                   NULL                     NULL                     NULL                          NULL                      NULL                        NULL                      NULL                    NULL                      NULL                    NULL                         0.000                 3300              55.000             
+  5100300        Alto Araguaia   MT  Soja (em grão)  2021     22                 22                21               0.955            683.800                      2305.750              3032.900                   60.000                7.000                 13.000                       24.808            41.100              14.200              11.698                   67.841               7.000                  1.095                3.580              927.181              2.221              19.700                  0.974            235.200                           1168.250                   1539.850                        18.000                     7.000                      13.000                            26.163                 41.100                   14.200                   13.770                        55.918                    7.000                       1.601                     3.580                   927.254                   2.345                   19.700                       1.000                 176.200                         414.950                  554.810                       15.000                   5.000                    0.000                           23.832               33.700                 16.000                 10.285                      77.950                  31.000                    0.667                   1.310                 927.185                 2.208                 15.100                     0.886               272.400                           722.550                    938.240                         27.000                     4.000                      2.000                             23.429                 33.100                   17.100                   9.546                         79.099                    29.000                      0.616                     1.290                   927.074                   2.051                   15.300                       1.000                 3420              57.000             
+  5100607        Alto Taquari    MT  Soja (em grão)  2021     22                 22                21               0.955            7.400                        2199.700              2951.610                   1.000                 7.000                 139.000                      23.864            39.800              15.800              11.658                   67.010               9.000                  1.044                3.240              915.931              2.384              23.900                  0.974            7.400                             1110.450                   1524.700                        1.000                      7.000                      55.000                            25.064                 39.800                   15.800                   13.319                        56.256                    9.000                       1.477                     3.240                   916.079                   2.644                   18.200                       1.000                 0.000                           398.000                  540.790                       0.000                    7.000                    90.000                          23.032               32.600                 17.800                 10.475                      76.388                  34.000                    0.670                   1.020                 915.877                 2.212                 15.300                     0.886               NULL                              691.250                    886.120                         0.000                      7.000                      139.000                           22.624                 32.400                   16.600                   9.961                         77.013                    30.000                      0.640                     1.340                   915.750                   2.110                   23.900                       1.000                 3780              63.000             
+  5100805        Apiacás         MT  Soja (em grão)  2021     22                 22                0                0.000            NULL                         NULL                  NULL                       NULL                  NULL                  NULL                         NULL              NULL                NULL                NULL                     NULL                 NULL                   NULL                 NULL               NULL                 NULL               NULL                    0.000            NULL                              NULL                       NULL                            NULL                       NULL                       NULL                              NULL                   NULL                     NULL                     NULL                          NULL                      NULL                        NULL                      NULL                    NULL                      NULL                    NULL                         0.000                 NULL                            NULL                     NULL                          NULL                     NULL                     NULL                            NULL                 NULL                   NULL                   NULL                        NULL                    NULL                      NULL                    NULL                  NULL                    NULL                  NULL                       0.000               NULL                              NULL                       NULL                            NULL                       NULL                       NULL                              NULL                   NULL                     NULL                     NULL                          NULL                      NULL                        NULL                      NULL                    NULL                      NULL                    NULL                         0.000                 3301              55.020             
+
+==============================================================================
+8. TABELA NÃO ESPERADA: CLIMA_SEMANAL
+==============================================================================
+
+-- amostra
+  id_clima_sem  id_regiao  periodo  periodo_label  data_inicio  data_fim    dias_validos  dias_no_periodo  cobertura  temp_media  temp_max_media  temp_min_media  temp_max_abs  temp_min_abs  amplitude_termica  graus_dia_acum  precipitacao_total_mm  dias_com_chuva  maior_veranico  dias_secos_acumulados  umidade_media  umidade_min_abs  vpd_medio_kpa  vpd_max_kpa  orvalho_medio  radiacao_total_mjm2  pressao_media  vento_medio  vento_rajada_max  vento_dir_predom  vento_dir_consistencia
+  ------------  ---------  -------  -------------  -----------  ----------  ------------  ---------------  ---------  ----------  --------------  --------------  ------------  ------------  -----------------  --------------  ---------------------  --------------  --------------  ---------------------  -------------  ---------------  -------------  -----------  -------------  -------------------  -------------  -----------  ----------------  ----------------  ----------------------
+  1             1          202001   2020-W01       2020-01-01   2020-01-05  5.000         7.000            0.714      NULL        NULL            NULL            NULL          NULL          NULL               NULL            NULL                   NULL            NULL            NULL                   NULL           NULL             NULL           NULL         NULL           NULL                 NULL           NULL         NULL              NULL              NULL                  
+  2             1          202002   2020-W02       2020-01-06   2020-01-12  7.000         7.000            1.000      24.860      30.260          20.970          31.600        18.000        9.290              109.300         105.200                4.000           2.000           0.000                  70.020         39.000           0.950          1.370        18.620         157.900              923.290        2.000        11.700            320.150           0.560                 
+  3             1          202003   2020-W03       2020-01-13   2020-01-19  7.000         7.000            1.000      22.190      27.190          18.910          31.900        17.100        8.270              91.350          87.800                 3.000           3.000           1.000                  74.040         36.000           0.710          1.060        17.100         111.770              927.260        2.180        10.100            120.040           0.760                 
+  4             1          202004   2020-W04       2020-01-20   2020-01-26  7.000         7.000            1.000      20.870      26.590          17.470          30.900        16.000        9.110              84.200          8.200                  2.000           3.000           2.000                  71.010         20.000           0.730          1.250        14.810         102.490              921.930        2.010        11.400            129.540           0.850                 
+  5             1          202005   2020-W05       2020-01-27   2020-02-02  7.000         7.000            1.000      24.290      30.940          19.900          33.600        16.400        11.040             107.950         126.200                4.000           1.000           0.000                  63.380         14.000           1.130          2.030        15.940         134.350              925.150        2.030        14.600            21.610            0.700                 
+
+==============================================================================
+8. TABELA NÃO ESPERADA: DADOS_CLIMATICOS_HISTORICOS_bkp_20261026_153658
+==============================================================================
+
+-- amostra
+  id_clima  id_regiao  ano_mes     dias_validos  dias_no_mes  cobertura  temp_media  temp_max_media  temp_min_media  temp_max_abs  temp_min_abs  amplitude_termica  graus_dia_acum  precipitacao_total_mm  dias_com_chuva  maior_veranico  umidade_media  umidade_min_abs  vpd_medio_kpa  orvalho_medio  radiacao_total_mjm2  pressao_media  vento_medio  vento_rajada_max  vento_dir_predom  vento_dir_consistencia
+  --------  ---------  ----------  ------------  -----------  ---------  ----------  --------------  --------------  ------------  ------------  -----------------  --------------  ---------------------  --------------  --------------  -------------  ---------------  -------------  -------------  -------------------  -------------  -----------  ----------------  ----------------  ----------------------
+  1         1          2023-01-01  31            31           1.00       22.28       27.94           18.92           33.20         15.20         9.02               416.20          207.40                 21              3               73.37          27.00            0.740          16.88          545.20               924.52         1.84         17.10             106.29            0.66                  
+  2         1          2023-02-01  28            28           1.00       22.91       28.66           19.48           31.50         17.50         9.18               394.00          428.00                 22              3               74.53          35.00            0.720          17.80          516.34               925.28         2.01         21.40             52.69             0.65                  
+  3         1          2023-03-01  31            31           1.00       23.07       29.85           19.35           32.60         18.00         10.50              452.60          234.80                 13              12              70.43          28.00            0.850          16.90          620.40               926.57         1.62         19.10             118.82            0.61                  
+  4         1          2023-04-01  30            30           1.00       20.26       25.71           17.07           30.50         12.40         8.64               341.75          94.60                  10              7               72.21          26.00            0.660          14.71          536.33               926.43         1.85         16.80             147.71            0.71                  
+  5         1          2023-05-01  29            31           0.94       19.06       24.77           15.43           29.20         11.10         9.34               293.00          60.20                  3               20              70.08          23.00            0.670          12.94          472.28               929.08         1.37         9.70              148.28            0.66                  
+
+==============================================================================
+8. TABELA NÃO ESPERADA: PONTE_ESTACAO_MUNICIPIO
+==============================================================================
+
+-- amostra
+  id_ponte  id_regiao  cod_municipio_ibge  municipio_ibge       metodo  escore
+  --------  ---------  ------------------  -------------------  ------  ------
+  1         1          3550308             São Paulo            exato   1.000 
+  2         2          3506003             Bauru                exato   1.000 
+  3         3          3509700             Campos do Jordão     exato   1.000 
+  4         4          3541406             Presidente Prudente  exato   1.000 
+  5         5          3516200             Franca               exato   1.000 
+
+==============================================================================
+8. TABELA NÃO ESPERADA: PRODUTIVIDADE_OBSERVADA_bkp_20261026_153658
+==============================================================================
+
+-- amostra
+  id_produtividade  cod_municipio_ibge  municipio_ibge  uf  cultura_tcc      safra  rendimento_kg_ha  rendimento_sacas_ha
+  ----------------  ------------------  --------------  --  ---------------  -----  ----------------  -------------------
+  1                 5100102             Acorizal - MT   MT  Milho (em grão)  112    2700.00           45.00              
+  2                 5100102             Acorizal - MT   MT  Milho (em grão)  112    2700.00           45.00              
+  3                 5100102             Acorizal - MT   MT  Milho (em grão)  112    1200.00           20.00              
+  4                 5100102             Acorizal - MT   MT  Milho (em grão)  112    1200.00           20.00              
+  5                 5100102             Acorizal - MT   MT  Milho (em grão)  112    0.00              0.00               
+
+==============================================================================
+9. ARQUIVOS LOCAIS — servem de origem para corrigir o banco?
+==============================================================================
+  pasta: C:\Users\Camassati\Desktop\TCC
+  OK   df_tcc_semana.xlsx                8,936 KB  modificado 2026-09-07 20:26
+  OK   df_tcc_modelo.xlsx                1,674 KB  modificado 2026-10-07 18:50
+  OK   dados_observados.xlsx               956 KB  modificado 2026-09-07 21:03
+  OK   modelo_export.json                  465 KB  modificado 2026-10-07 18:50
+  --   res_final.json               AUSENTE
+  --   coef_final.json              AUSENTE
+  OK   robustez.xlsx                        97 KB  modificado 2026-10-07 18:50
+  --   sensor.json                  AUSENTE
+  OK   calculadora_safra.html               54 KB  modificado 2026-10-26 15:01
+  OK   migrar_banco.py                      31 KB  modificado 2026-10-26 15:34
+  OK   treinar_export.py                     6 KB  modificado 2026-10-07 18:50
+  --   pasta inmet_historico: não encontrada aqui
+  OK   pasta arquivos para bd tcc\inmet_historico: 5747 arquivos
+  OK   pasta cache_diario: 919 arquivos
+
+-- df_tcc_semana.xlsx (aba 'dados') — origem de CLIMA_SEMANAL
+  47,022 linhas | 184 estações | periodo 202001 a 202601
+  UFs: {'RS': 14375, 'SP': 12723, 'MT': 11862, 'PR': 8062}
+  linhas em (estação, periodo) repetidos: 6  (semanas partidas na virada do ano — armadilha A6)
+  colunas que faltam no mensal do banco e estão aqui: ['vpd_max_kpa', 'dias_secos_acumulados', 'vpd_medio_kpa']
+
+-- df_tcc_modelo.xlsx — origem de PRODUTIVIDADE_OBSERVADA e da ponte
+  abas: ['modelo', 'pam_bruto', 'ponte_municipio', 'janelas_ciclo', 'procedencia']
+  pam_bruto: 32,979 linhas | anos [np.int64(2016), np.int64(2017), np.int64(2018), np.int64(2019), np.int64(2020), np.int64(2021), np.int64(2022), np.int64(2023), np.int64(2024)]
+  ANO DE VERDADE (não 112)? SIM
+  modelo: 1,460 linhas x 83 colunas | 148 municípios | safras [np.int64(2020), np.int64(2021), np.int64(2022), np.int64(2023), np.int64(2024)]
+  ponte_municipio: 188 linhas | métodos {'exato': 180, 'aproximado': 4, 'abreviacao': 2, 'SEM CASAMENTO': 2}
+
+-- dados_observados.xlsx — o realizado do IBGE, separado
+  32,979 linhas | safras [np.int64(2016), np.int64(2017), np.int64(2018), np.int64(2019), np.int64(2020), np.int64(2021), np.int64(2022), np.int64(2023), np.int64(2024)] | 1620 municípios
+  (compare o total com as linhas de PRODUTIVIDADE_OBSERVADA no banco)

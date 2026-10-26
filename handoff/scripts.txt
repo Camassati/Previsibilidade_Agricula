@@ -1,0 +1,1692 @@
+
+==============================================================================
+ARQUIVO: banco.py
+==============================================================================
+
+# -*- coding: utf-8 -*-
+"""Acesso ao banco MySQL do TCC.
+
+Centraliza a conexão para que os notebooks não precisem repetir credencial.
+As credenciais ficam em `banco_config.ini`, que NÃO deve ir para o GitHub nem
+ser anexado ao TCC — se o repositório for público, a senha vaza junto.
+
+Uso:
+    from banco import conectar, ler_tabela, gravar_tabela
+
+    df = ler_tabela("df_tcc_modelo")
+    gravar_tabela(df, "df_tcc_modelo")
+
+Para inspecionar o que existe no banco:
+    python banco.py
+"""
+import configparser
+import os
+import sys
+
+import pandas as pd
+
+CONFIG = "banco_config.ini"
+
+
+def _credenciais():
+    """Lê de banco_config.ini; variáveis de ambiente têm precedência."""
+    cfg = {"host": os.environ.get("TCC_DB_HOST"),
+           "user": os.environ.get("TCC_DB_USER"),
+           "password": os.environ.get("TCC_DB_PASS"),
+           "database": os.environ.get("TCC_DB_NAME"),
+           "port": int(os.environ.get("TCC_DB_PORT", 3306))}
+    if all(cfg[k] for k in ("host", "user", "password", "database")):
+        return cfg
+
+    if not os.path.exists(CONFIG):
+        raise FileNotFoundError(
+            f"{CONFIG} não encontrado. Crie o arquivo com:\n\n"
+            "[mysql]\nhost = ...\nuser = ...\npassword = ...\n"
+            "database = ...\nport = 3306\n")
+    p = configparser.ConfigParser()
+    p.read(CONFIG, encoding="utf-8")
+    s = p["mysql"]
+    return {"host": s["host"], "user": s["user"], "password": s["password"],
+            "database": s["database"], "port": s.getint("port", fallback=3306)}
+
+
+def conectar():
+    """Conexão pymysql. Lembre de fechar, ou use `with conectar() as c:`."""
+    import pymysql
+    c = _credenciais()
+    return pymysql.connect(host=c["host"], user=c["user"], password=c["password"],
+                           database=c["database"], port=c["port"],
+                           charset="utf8mb4", connect_timeout=30,
+                           cursorclass=pymysql.cursors.Cursor)
+
+
+def engine():
+    """Engine SQLAlchemy, que é o que o pandas prefere para to_sql."""
+    from sqlalchemy import create_engine
+    from urllib.parse import quote_plus
+    c = _credenciais()
+    return create_engine(
+        f"mysql+pymysql://{c['user']}:{quote_plus(c['password'])}"
+        f"@{c['host']}:{c['port']}/{c['database']}?charset=utf8mb4",
+        pool_pre_ping=True)
+
+
+def listar_tabelas():
+    with conectar() as c, c.cursor() as k:
+        k.execute("SHOW TABLES")
+        return [r[0] for r in k.fetchall()]
+
+
+def ler_tabela(nome, limite=None):
+    sql = f"SELECT * FROM `{nome}`" + (f" LIMIT {int(limite)}" if limite else "")
+    return pd.read_sql(sql, engine())
+
+
+def gravar_tabela(df, nome, se_existir="replace", lote=1000):
+    """Grava o DataFrame numa tabela. `se_existir`: replace | append | fail."""
+    df.to_sql(nome, engine(), if_exists=se_existir, index=False,
+              chunksize=lote, method="multi")
+    print(f"{nome}: {len(df)} linhas gravadas")
+
+
+# ----------------------------------------------------------- inspeção -------
+def inventario(saida="banco_inventario.txt", amostra=3):
+    """Varre o banco e escreve um inventário legível: tabelas, colunas, tipos,
+    contagem de linhas e uma amostra. É o que eu preciso ver para adaptar o
+    pipeline ao que de fato está lá."""
+    linhas = []
+
+    def p(s=""):
+        print(s)
+        linhas.append(str(s))
+
+    with conectar() as c, c.cursor() as k:
+        k.execute("SELECT VERSION(), DATABASE()")
+        versao, banco = k.fetchone()
+        p(f"MySQL {versao} | banco: {banco}")
+        k.execute("SHOW TABLES")
+        tabelas = [r[0] for r in k.fetchall()]
+        p(f"{len(tabelas)} tabelas\n")
+
+        for t in tabelas:
+            k.execute(f"SELECT COUNT(*) FROM `{t}`")
+            n = k.fetchone()[0]
+            p("=" * 72)
+            p(f"TABELA {t}  —  {n:,} linhas")
+            p("=" * 72)
+
+            k.execute(f"DESCRIBE `{t}`")
+            cols = k.fetchall()
+            p(f"{len(cols)} colunas:")
+            for nome, tipo, nulo, chave, padrao, extra in cols:
+                marca = f" [{chave}]" if chave else ""
+                p(f"   {nome:34s} {tipo:22s} {'NULL' if nulo == 'YES' else 'NOT NULL':9s}{marca}")
+
+            # chaves estrangeiras, que é o que diz se há integridade referencial
+            k.execute("""
+                SELECT COLUMN_NAME, REFERENCED_TABLE_NAME, REFERENCED_COLUMN_NAME
+                FROM information_schema.KEY_COLUMN_USAGE
+                WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s
+                  AND REFERENCED_TABLE_NAME IS NOT NULL""", (banco, t))
+            fks = k.fetchall()
+            if fks:
+                p("chaves estrangeiras:")
+                for col, rt, rc in fks:
+                    p(f"   {col} -> {rt}.{rc}")
+            else:
+                p("chaves estrangeiras: nenhuma")
+
+            if n and amostra:
+                k.execute(f"SELECT * FROM `{t}` LIMIT {int(amostra)}")
+                nomes = [d[0] for d in k.description]
+                p(f"amostra ({amostra} linhas):")
+                for r in k.fetchall():
+                    par = ", ".join(f"{a}={b!r}" for a, b in list(zip(nomes, r))[:8])
+                    p(f"   {par}" + (" ..." if len(nomes) > 8 else ""))
+            p()
+
+    with open(saida, "w", encoding="utf-8") as f:
+        f.write("\n".join(linhas))
+    print(f"\n>>> Inventário gravado em {saida}")
+    return tabelas
+
+
+if __name__ == "__main__":
+    try:
+        inventario()
+    except Exception as e:
+        print(f"\nFALHOU: {type(e).__name__}: {e}\n", file=sys.stderr)
+        print("Causas comuns:", file=sys.stderr)
+        print("  - banco_config.ini ausente ou com credencial errada", file=sys.stderr)
+        print("  - o DBaaS exige liberar o seu IP no painel antes de aceitar conexão",
+              file=sys.stderr)
+        print("  - falta instalar: pip install pymysql sqlalchemy pandas", file=sys.stderr)
+        sys.exit(1)
+
+
+==============================================================================
+ARQUIVO: migrar_banco.py
+==============================================================================
+
+# -*- coding: utf-8 -*-
+"""Sobe os dados corrigidos do pipeline para o MySQL, sem tocar no IoT.
+
+PROTEGIDAS — o script não escreve nelas e confere no fim se continuam iguais:
+    SENSOR_IOT           o ESP32 cadastrado
+    LEITURA_IOT          as leituras reais do sensor
+    CONFIGURACAO_SAFRA   LEITURA_IOT tem chave estrangeira para cá; mexer quebra
+
+O QUE FAZ — deixa o banco idêntico às bases locais:
+    REGIAO                      insere estações que faltam (preserva os
+                                id_regiao existentes, porque há FK apontando
+                                para eles) e acrescenta id_solo -> TIPO_SOLO
+    PONTE_ESTACAO_MUNICIPIO     cria e popula; é a tabela que faltava para ligar
+                                estação a município e fechar a integridade
+    CLIMA_SEMANAL               cria e popula com df_tcc_semana.xlsx (47 mil)
+    DADOS_CLIMATICOS_HISTORICOS backup e recarga com o mensal derivado da base
+                                semanal — passa a cobrir 2020-2025 em vez de
+                                só 2023 em diante
+    PRODUTIVIDADE_OBSERVADA     backup e recarga com a PAM corrigida, safra como
+                                ano de verdade em vez do código 112 do SIDRA
+    BASE_MODELO                 cria e popula com df_tcc_modelo.xlsx
+
+USO:
+    python migrar_banco.py              simula e mostra o que faria, sem escrever
+    python migrar_banco.py --aplicar    executa de verdade
+"""
+import sys
+from datetime import datetime
+
+import numpy as np
+import pandas as pd
+
+from banco import conectar, engine
+
+ARQ_SEMANA = "df_tcc_semana.xlsx"
+ARQ_MODELO = "df_tcc_modelo.xlsx"
+PROTEGIDAS = ["SENSOR_IOT", "LEITURA_IOT", "CONFIGURACAO_SAFRA"]
+APLICAR = "--aplicar" in sys.argv
+LOTE = 1000
+
+
+def log(s=""):
+    print(s, flush=True)
+
+
+def contar(cur, tabela):
+    cur.execute(f"SELECT COUNT(*) FROM `{tabela}`")
+    return cur.fetchone()[0]
+
+
+def existe_coluna(cur, tabela, coluna):
+    cur.execute("""SELECT COUNT(*) FROM information_schema.COLUMNS
+                   WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s
+                     AND COLUMN_NAME = %s""", (tabela, coluna))
+    return cur.fetchone()[0] > 0
+
+
+def executar(cur, sql, args=None, descricao=None):
+    if descricao:
+        log(f"   {descricao}")
+    if APLICAR:
+        cur.execute(sql, args or ())
+    return APLICAR
+
+
+# --------------------------------------------------------------- leitura ----
+log("Lendo as planilhas do pipeline...")
+sem = pd.read_excel(ARQ_SEMANA, sheet_name="dados")
+xm = pd.ExcelFile(ARQ_MODELO)
+modelo = xm.parse("modelo")
+pam = xm.parse("pam_bruto")
+ponte = xm.parse("ponte_municipio")
+log(f"   clima semanal : {len(sem):,} linhas, {sem.Cod_Estacao.nunique()} estações")
+log(f"   PAM corrigida : {len(pam):,} linhas, safras {sorted(pam.ano_pam.dropna().unique())}")
+log(f"   base do modelo: {len(modelo):,} linhas")
+
+# --------------------------------- semanas partidas na virada do ano ---------
+# O ETL agrupou por (ano civil, semana ISO). Uma semana ISO que atravessa 31/12
+# aparece então duas vezes com o MESMO periodo: um trecho em dezembro e outro em
+# janeiro (ex. A740 / 202152 = 27-31/12/2021 + 01-02/01/2022). Em CLIMA_SEMANAL
+# existe UNIQUE KEY (id_regiao, periodo), então os dois trechos têm de ser
+# reunidos na semana única que de fato são — com a mesma semântica de agregação
+# usada no resto do pipeline.
+SEM_SOMA = ["dias_validos", "graus_dia_acum",
+            "precipitacao_total_mm", "dias_com_chuva", "radiacao_total_mjm2"]
+# dias_no_periodo é propriedade da semana (7), não do trecho: os dois trechos já
+# trazem 7 cada um, então somar daria 14. Fica o máximo.
+SEM_MAX = ["dias_no_periodo", "temp_max_abs", "maior_veranico",
+           "dias_secos_acumulados", "vpd_max_kpa", "vento_rajada_max"]
+SEM_MIN = ["temp_min_abs", "umidade_min_abs"]
+
+_chave = ["Cod_Estacao", "periodo"]
+_dups = sem[sem.duplicated(_chave, keep=False)]
+if len(_dups):
+    pares = _dups.groupby(_chave, sort=True).size()
+    log(f"   {len(_dups)} linhas em {len(pares)} semanas partidas na virada do "
+        f"ano — reunindo em uma linha por semana:")
+    for (est, per), n in pares.items():
+        log(f"      {est} / {per} ({n} trechos)")
+
+    _num = [c for c in sem.columns
+            if pd.api.types.is_numeric_dtype(sem[c]) and c not in ("periodo",)]
+    _agg = {}
+    for c in sem.columns:
+        if c in _chave:
+            continue
+        if c in SEM_SOMA:
+            _agg[c] = lambda x: x.sum(min_count=1)       # acumulados somam
+        elif c in SEM_MAX:
+            _agg[c] = "max"                              # extremos superiores
+        elif c in SEM_MIN:
+            _agg[c] = "min"                              # extremos inferiores
+        elif c == "data_inicio":
+            _agg[c] = "min"
+        elif c in ("data_fim", "periodo_label"):
+            _agg[c] = "max"
+        elif c in _num:
+            _agg[c] = "mean"                             # estados médios
+        else:
+            _agg[c] = "first"                            # UF, Cidade, solo...
+    antes = len(sem)
+    sem = (sem.groupby(_chave, as_index=False, sort=False).agg(_agg)
+              .reindex(columns=sem.columns))
+    # 'cobertura' é razão, não estado: recalcula em vez de herdar a média
+    if {"dias_validos", "dias_no_periodo"} <= set(sem.columns):
+        sem["cobertura"] = (sem.dias_validos /
+                            sem.dias_no_periodo.replace(0, np.nan))
+    log(f"   clima semanal : {antes:,} -> {len(sem):,} linhas")
+    assert not sem.duplicated(_chave).any(), "ainda há (estação, periodo) repetido"
+else:
+    log("   nenhuma semana partida na virada do ano")
+
+# Guarda: a PAM tem que ter ano de verdade, não o código 112 do SIDRA.
+anos = set(pd.to_numeric(pam["ano_pam"], errors="coerce").dropna().astype(int))
+if not anos or min(anos) < 1990 or max(anos) > 2100:
+    raise SystemExit(
+        f"ABORTADO: ano_pam fora de faixa ({sorted(anos)[:5]}). Se aparecer 112, "
+        "a planilha é a versão anterior à correção do SIDRA — reexecute o "
+        "notebook do alvo antes de migrar.")
+log(f"   OK: anos da PAM plausíveis ({min(anos)}–{max(anos)})")
+
+con = conectar()
+cur = con.cursor()
+
+# ------------------------------------------------------ estado protegido ----
+log("\nConferindo as tabelas protegidas (antes):")
+antes = {}
+for t in PROTEGIDAS:
+    antes[t] = contar(cur, t)
+    log(f"   {t:22s} {antes[t]:>7,} linhas")
+
+if not APLICAR:
+    log("\n*** SIMULAÇÃO — nada será gravado. Rode com --aplicar para valer. ***")
+
+# ------------------------------------------------------------- 1. REGIAO ----
+log("\n1. REGIAO")
+cur.execute("SELECT id_regiao, cod_estacao FROM REGIAO")
+reg = {c: i for i, c in cur.fetchall() if c}
+log(f"   {len(reg)} estações já cadastradas")
+
+est = (sem[["Cod_Estacao", "UF", "Cidade", "id_solo"]]
+       .drop_duplicates("Cod_Estacao"))
+faltam = est[~est.Cod_Estacao.isin(reg)]
+log(f"   {len(faltam)} estações da base semanal ainda não estão no banco")
+if len(faltam) and APLICAR:
+    cur.executemany(
+        "INSERT INTO REGIAO (uf, cidade, cod_estacao) VALUES (%s, %s, %s)",
+        [(r.UF, r.Cidade, r.Cod_Estacao) for r in faltam.itertuples()])
+    con.commit()
+    cur.execute("SELECT id_regiao, cod_estacao FROM REGIAO")
+    reg = {c: i for i, c in cur.fetchall() if c}
+    log(f"   inseridas; agora {len(reg)} estações")
+
+# liga REGIAO -> TIPO_SOLO, que é o que faz o solo finalmente chegar ao modelo
+if not existe_coluna(cur, "REGIAO", "id_solo"):
+    executar(cur, "ALTER TABLE REGIAO ADD COLUMN id_solo INT UNSIGNED NULL",
+             descricao="acrescenta a coluna id_solo")
+    executar(cur, "ALTER TABLE REGIAO ADD CONSTRAINT fk_regiao_solo "
+                  "FOREIGN KEY (id_solo) REFERENCES TIPO_SOLO(id_solo)",
+             descricao="acrescenta a chave estrangeira para TIPO_SOLO")
+else:
+    log("   coluna id_solo já existe")
+
+solos = est.dropna(subset=["id_solo"])
+log(f"   preenche id_solo em {len(solos)} estações "
+    f"({solos.id_solo.nunique()} tipos distintos)")
+if APLICAR:
+    cur.executemany("UPDATE REGIAO SET id_solo = %s WHERE cod_estacao = %s",
+                    [(int(r.id_solo), r.Cod_Estacao) for r in solos.itertuples()])
+    con.commit()
+
+# ------------------------------------------------------ 2. CLIMA_SEMANAL ----
+log("\n2. CLIMA_SEMANAL")
+NUM = [c for c in sem.columns if c not in
+       ("periodo", "periodo_label", "data_inicio", "data_fim", "UF", "Cidade",
+        "Cod_Estacao", "id_solo", "nome_solo", "ordem_solo", "textura", "fonte",
+        "culturas_predominantes", "retencao_agua", "drenagem", "aptidao_graos",
+        "profundidade", "risco_erosao")
+       and pd.api.types.is_numeric_dtype(sem[c])]
+log(f"   {len(NUM)} colunas climáticas")
+
+clima = sem[["Cod_Estacao", "periodo", "periodo_label", "data_inicio", "data_fim"] + NUM].copy()
+clima["id_regiao"] = clima.Cod_Estacao.map(reg)
+orfas = int(clima.id_regiao.isna().sum())
+if orfas:
+    log(f"   {orfas} linhas sem id_regiao — serão descartadas")
+    clima = clima.dropna(subset=["id_regiao"])
+clima["id_regiao"] = clima.id_regiao.astype(int)
+clima = clima.drop(columns="Cod_Estacao")
+clima = clima.replace([np.inf, -np.inf], np.nan).where(pd.notna(clima), None)
+log(f"   {len(clima):,} linhas prontas para gravar")
+
+cols_sql = ",\n        ".join(f"`{c}` DECIMAL(12,3) NULL" for c in NUM)
+DDL_CLIMA = f"""
+    CREATE TABLE CLIMA_SEMANAL (
+        id_clima_sem BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        id_regiao    INT UNSIGNED NOT NULL,
+        periodo      INT UNSIGNED NOT NULL COMMENT 'ano ISO * 100 + semana ISO',
+        periodo_label VARCHAR(10) NOT NULL COMMENT 'ex. 2023-W07',
+        data_inicio  DATE NULL,
+        data_fim     DATE NULL,
+        {cols_sql},
+        UNIQUE KEY uq_regiao_periodo (id_regiao, periodo),
+        KEY ix_periodo (periodo),
+        CONSTRAINT fk_clima_sem_regiao FOREIGN KEY (id_regiao)
+            REFERENCES REGIAO(id_regiao)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4"""
+executar(cur, "DROP TABLE IF EXISTS CLIMA_SEMANAL", descricao="dropa se já existir")
+executar(cur, DDL_CLIMA, descricao=f"cria a tabela ({len(NUM) + 6} colunas)")
+
+# ----------------------------------------- 3. PRODUTIVIDADE_OBSERVADA -------
+log("\n3. PRODUTIVIDADE_OBSERVADA")
+bkp = f"PRODUTIVIDADE_OBSERVADA_bkp_{datetime.now():%Y%m%d}"
+n_atual = contar(cur, "PRODUTIVIDADE_OBSERVADA")
+log(f"   {n_atual:,} linhas atuais (com safra='112') -> backup em {bkp}")
+executar(cur, f"DROP TABLE IF EXISTS `{bkp}`")
+executar(cur, f"RENAME TABLE PRODUTIVIDADE_OBSERVADA TO `{bkp}`",
+         descricao="renomeia a atual para backup")
+executar(cur, """
+    CREATE TABLE PRODUTIVIDADE_OBSERVADA (
+        id_produtividade  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        cod_municipio_ibge INT UNSIGNED NOT NULL,
+        municipio_ibge    VARCHAR(150) NULL,
+        uf                CHAR(2) NOT NULL,
+        cultura_tcc       VARCHAR(100) NOT NULL,
+        safra             SMALLINT UNSIGNED NOT NULL COMMENT 'ano da safra PAM',
+        rendimento_kg_ha   DECIMAL(12,2) NULL,
+        rendimento_sacas_ha DECIMAL(10,2) NULL,
+        UNIQUE KEY uq_mun_cultura_safra (cod_municipio_ibge, cultura_tcc, safra),
+        KEY ix_uf_safra (uf, safra)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
+         descricao="recria com safra SMALLINT e chave única")
+
+SACAS = {"Soja (em grão)": 60, "Milho (em grão)": 60, "Trigo (em grão)": 60}
+# pam_bruto já traz 'cultura' E 'cultura_tcc' (o nome bruto do SIDRA e o
+# normalizado). Renomear 'cultura' criaria duas colunas com o mesmo nome, e aí
+# df['cultura_tcc'] devolve um DataFrame em vez de uma Series.
+p = pam.drop(columns=[c for c in ("cultura",) if "cultura_tcc" in pam.columns
+                      and c in pam.columns]).copy()
+renomear = {"cod_municipio": "cod_municipio_ibge", "ano_pam": "safra"}
+if "cultura_tcc" not in p.columns:
+    renomear["cultura"] = "cultura_tcc"
+p = p.rename(columns=renomear)
+assert not p.columns.duplicated().any(), \
+    f"colunas duplicadas após o rename: {list(p.columns[p.columns.duplicated()])}"
+p["uf"] = p["UF"] if "UF" in p.columns else None
+p["safra"] = pd.to_numeric(p.safra, errors="coerce").astype("Int64")
+p["cod_municipio_ibge"] = pd.to_numeric(p.cod_municipio_ibge, errors="coerce").astype("Int64")
+p["rendimento_sacas_ha"] = p.rendimento_kg_ha / p.cultura_tcc.map(SACAS).fillna(60)
+p = p.dropna(subset=["cod_municipio_ibge", "safra", "cultura_tcc"])
+antes_dedup = len(p)
+p = p.drop_duplicates(["cod_municipio_ibge", "cultura_tcc", "safra"])
+log(f"   {antes_dedup:,} linhas -> {len(p):,} após remover duplicatas "
+    f"({antes_dedup - len(p):,} repetidas)")
+prod = p[["cod_municipio_ibge", "municipio_ibge", "uf", "cultura_tcc", "safra",
+          "rendimento_kg_ha", "rendimento_sacas_ha"]].where(pd.notna(p), None)
+
+# ------------------------------- 3b. DADOS_CLIMATICOS_HISTORICOS (mensal) ----
+log("\n3b. DADOS_CLIMATICOS_HISTORICOS")
+# O mensal é derivado do semanal, com a mesma semântica de agregação: soma para
+# acumulados, média para estados, extremos para máx/mín. Cada semana é atribuída
+# ao mês da sua data de início — aproximação necessária, porque uma semana ISO
+# pode atravessar a virada do mês.
+MENSAL_SOMA = ["precipitacao_total_mm", "graus_dia_acum", "radiacao_total_mjm2",
+               "dias_com_chuva", "dias_validos"]
+MENSAL_MEDIA = ["temp_media", "temp_max_media", "temp_min_media", "amplitude_termica",
+                "umidade_media", "vpd_medio_kpa", "orvalho_medio", "pressao_media",
+                "vento_medio", "vento_dir_predom", "vento_dir_consistencia"]
+MENSAL_MAX = ["temp_max_abs", "maior_veranico", "vento_rajada_max"]
+MENSAL_MIN = ["temp_min_abs", "umidade_min_abs"]
+
+mes = sem.copy()
+mes["ano_mes"] = pd.to_datetime(mes["data_inicio"]).dt.to_period("M").dt.to_timestamp()
+agg = {c: (lambda x: x.sum(min_count=1)) for c in MENSAL_SOMA if c in mes.columns}
+agg.update({c: "mean" for c in MENSAL_MEDIA if c in mes.columns})
+agg.update({c: "max" for c in MENSAL_MAX if c in mes.columns})
+agg.update({c: "min" for c in MENSAL_MIN if c in mes.columns})
+mensal = mes.groupby(["Cod_Estacao", "ano_mes"], as_index=False).agg(agg)
+mensal["dias_no_mes"] = mensal.ano_mes.dt.days_in_month
+mensal["cobertura"] = (mensal.dias_validos / mensal.dias_no_mes).round(2).clip(upper=1)
+mensal["id_regiao"] = mensal.Cod_Estacao.map(reg)
+mensal = mensal.dropna(subset=["id_regiao"])
+mensal["id_regiao"] = mensal.id_regiao.astype(int)
+mensal = mensal.drop(columns="Cod_Estacao")
+mensal = mensal.replace([np.inf, -np.inf], np.nan).where(pd.notna(mensal), None)
+log(f"   {len(mensal):,} linhas mensais, "
+    f"{mes.ano_mes.min():%Y-%m} a {mes.ano_mes.max():%Y-%m}")
+
+bkp_clima = f"DADOS_CLIMATICOS_HISTORICOS_bkp_{datetime.now():%Y%m%d}"
+n_clima = contar(cur, "DADOS_CLIMATICOS_HISTORICOS")
+log(f"   {n_clima:,} linhas atuais (só 2023 em diante) -> backup em {bkp_clima}")
+executar(cur, f"DROP TABLE IF EXISTS `{bkp_clima}`")
+executar(cur, f"RENAME TABLE DADOS_CLIMATICOS_HISTORICOS TO `{bkp_clima}`",
+         descricao="renomeia a atual para backup")
+cols_m = [c for c in mensal.columns if c not in ("id_regiao", "ano_mes")]
+ddl_m = ",\n        ".join(f"`{c}` DECIMAL(12,3) NULL" for c in cols_m)
+executar(cur, f"""
+    CREATE TABLE DADOS_CLIMATICOS_HISTORICOS (
+        id_clima  BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        id_regiao INT UNSIGNED NOT NULL,
+        ano_mes   DATE NOT NULL,
+        {ddl_m},
+        UNIQUE KEY uq_regiao_mes (id_regiao, ano_mes),
+        KEY ix_ano_mes (ano_mes),
+        CONSTRAINT fk_clima_mes_regiao FOREIGN KEY (id_regiao)
+            REFERENCES REGIAO(id_regiao)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
+         descricao=f"recria com {len(cols_m) + 3} colunas e chave única")
+
+# ------------------------------- 3c. PONTE_ESTACAO_MUNICIPIO ----------------
+log("\n3c. PONTE_ESTACAO_MUNICIPIO")
+# A tabela que faltava: REGIAO é estação meteorológica e o rendimento da PAM é
+# por município. Sem ela, PRODUTIVIDADE_OBSERVADA e BASE_MODELO ficam sem
+# ligação com o resto do modelo.
+pt = ponte[ponte.cod_municipio.notna()].copy()
+pt["id_regiao"] = pt.Cod_Estacao.map(reg)
+sem_reg = int(pt.id_regiao.isna().sum())
+if sem_reg:
+    log(f"   {sem_reg} linhas sem id_regiao — descartadas")
+    pt = pt.dropna(subset=["id_regiao"])
+pt["id_regiao"] = pt.id_regiao.astype(int)
+pt["cod_municipio_ibge"] = pd.to_numeric(pt.cod_municipio, errors="coerce").astype("Int64")
+pt = pt[["id_regiao", "cod_municipio_ibge", "municipio_ibge", "metodo", "escore"]]
+pt = pt.drop_duplicates("id_regiao").where(pd.notna(pt), None)
+log(f"   {len(pt)} associações | métodos: "
+    f"{ponte.metodo.value_counts().to_dict()}")
+executar(cur, "DROP TABLE IF EXISTS PONTE_ESTACAO_MUNICIPIO")
+executar(cur, """
+    CREATE TABLE PONTE_ESTACAO_MUNICIPIO (
+        id_ponte INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+        id_regiao INT UNSIGNED NOT NULL,
+        cod_municipio_ibge INT UNSIGNED NOT NULL,
+        municipio_ibge VARCHAR(150) NULL,
+        metodo VARCHAR(30) NOT NULL COMMENT 'exato | abreviacao | aproximado',
+        escore DECIMAL(5,3) NULL COMMENT 'similaridade, 1 = correspondencia exata',
+        UNIQUE KEY uq_regiao (id_regiao),
+        KEY ix_municipio (cod_municipio_ibge),
+        CONSTRAINT fk_ponte_regiao FOREIGN KEY (id_regiao)
+            REFERENCES REGIAO(id_regiao)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4""",
+         descricao="cria a tabela ponte")
+
+# ------------------------------------------------------- 4. BASE_MODELO -----
+log("\n4. BASE_MODELO")
+base = modelo.copy()
+base.columns = [c.replace(" ", "_")[:60] for c in base.columns]
+log(f"   {len(base):,} linhas x {len(base.columns)} colunas")
+
+# ------------------------------------------------------------ gravação -----
+if APLICAR:
+    log("\nGravando (pode levar alguns minutos)...")
+    eng = engine()
+    clima.to_sql("CLIMA_SEMANAL", eng, if_exists="append", index=False,
+                 chunksize=LOTE, method="multi")
+    log(f"   CLIMA_SEMANAL: {len(clima):,} linhas")
+    mensal.to_sql("DADOS_CLIMATICOS_HISTORICOS", eng, if_exists="append",
+                  index=False, chunksize=LOTE, method="multi")
+    log(f"   DADOS_CLIMATICOS_HISTORICOS: {len(mensal):,} linhas")
+    pt.to_sql("PONTE_ESTACAO_MUNICIPIO", eng, if_exists="append", index=False,
+              chunksize=LOTE, method="multi")
+    log(f"   PONTE_ESTACAO_MUNICIPIO: {len(pt):,} linhas")
+    prod.to_sql("PRODUTIVIDADE_OBSERVADA", eng, if_exists="append", index=False,
+                chunksize=LOTE, method="multi")
+    log(f"   PRODUTIVIDADE_OBSERVADA: {len(prod):,} linhas")
+    base.to_sql("BASE_MODELO", eng, if_exists="replace", index=False,
+                chunksize=LOTE, method="multi")
+    log(f"   BASE_MODELO: {len(base):,} linhas")
+
+# --------------------------------------------------------- verificação -----
+log("\nConferindo as tabelas protegidas (depois):")
+ok = True
+for t in PROTEGIDAS:
+    n = contar(cur, t)
+    igual = n == antes[t]
+    ok &= igual
+    log(f"   {t:22s} {n:>7,} linhas  {'OK' if igual else '<<< MUDOU!'}")
+
+if APLICAR:
+    log("\nResumo final:")
+    for t in ["REGIAO", "TIPO_SOLO", "CULTURA", "PONTE_ESTACAO_MUNICIPIO",
+              "CLIMA_SEMANAL", "DADOS_CLIMATICOS_HISTORICOS",
+              "PRODUTIVIDADE_OBSERVADA", "BASE_MODELO"]:
+        try:
+            log(f"   {t:28s} {contar(cur, t):>8,} linhas")
+        except Exception:
+            log(f"   {t:28s}        (ausente)")
+    cur.execute("SELECT MIN(safra), MAX(safra) FROM PRODUTIVIDADE_OBSERVADA")
+    log(f"\n   safras na PRODUTIVIDADE_OBSERVADA: {cur.fetchone()}")
+    cur.execute("SELECT MIN(ano_mes), MAX(ano_mes) FROM DADOS_CLIMATICOS_HISTORICOS")
+    log(f"   período em DADOS_CLIMATICOS_HISTORICOS: {cur.fetchone()}")
+    cur.execute("SELECT MIN(periodo), MAX(periodo) FROM CLIMA_SEMANAL")
+    log(f"   período em CLIMA_SEMANAL: {cur.fetchone()}")
+
+cur.close()
+con.close()
+log("\n" + ("Migração concluída." if APLICAR else
+            "Simulação concluída. Rode com --aplicar para gravar."))
+if not ok:
+    raise SystemExit("ATENÇÃO: uma tabela protegida mudou. Investigue antes de seguir.")
+
+
+==============================================================================
+ARQUIVO: calculadora.py
+==============================================================================
+
+# -*- coding: utf-8 -*-
+"""Calculadora Agrícola — núcleo de cálculo.
+
+Vai do rendimento municipal previsto pelo Elastic Net até o resultado do
+produtor: sacas na área dele, receita, custo, lucro e risco de ficar abaixo
+do ponto de equilíbrio.
+
+Usado pelo notebook (ipywidgets) e pela página HTML. Toda a conta está aqui,
+para que as duas interfaces nunca divirjam.
+"""
+import json
+import numpy as np
+
+# Referências editáveis pelo usuário. Valores de outubro/2026, para ancorar
+# o formulário — o produtor informa os dele.
+PRECO_REF = {            # R$ por saca de 60 kg
+    "Soja (em grão)":  154.35,   # CEPEA/ESALQ, Paraná interior, 01/10/2026
+    "Milho (em grão)":  62.00,   # ordem de grandeza do indicador CEPEA
+    "Trigo (em grão)":  92.30,   # CEPEA/ESALQ PR, R$ 1.538,31/t convertido
+}
+CUSTO_REF = {            # R$ por hectare, custo de produção
+    "Soja (em grão)":  6115.83,  # Aprosoja/MS, safra 2025/26
+    "Milho (em grão)": 5200.00,
+    "Trigo (em grão)": 4100.00,
+}
+
+
+class Calculadora:
+    def __init__(self, caminho="modelo_export.json"):
+        with open(caminho, encoding="utf-8") as f:
+            self.d = json.load(f)
+        self.ordem = self.d["ordem_m3"]
+        self.pos = {v: i for i, v in enumerate(self.ordem)}
+        self.linhas = self.d["linhas"]
+        self.valores = self.d["valores"]
+
+    # ---------------------------------------------------------------- modelo
+    def prever_rendimento(self, idx, momento="M3"):
+        """Rendimento municipal previsto, em sacas/ha, com a contribuição de
+        cada variável. É um Elastic Net: previsão é soma de termos lineares,
+        e é por isso que dá para abrir o resultado variável a variável."""
+        m = self.d["momentos"][momento]
+        linha = self.valores[idx]
+        total = m["intercept"]
+        contrib = []
+        for j, var in enumerate(m["variaveis"]):
+            coef = m["coef"][j]
+            bruto = linha[self.pos[var]]
+            if bruto is None:
+                bruto = m["mediana"][j]
+            # mesma escala Min-Max que o Pipeline aplicou no treino
+            esc = (bruto - m["min"][j]) / m["range"][j]
+            esc = min(1.0, max(0.0, esc))
+            parcela = coef * esc
+            total += parcela
+            if coef != 0:
+                contrib.append({"variavel": var, "valor": bruto,
+                                "coeficiente": coef, "contribuicao": parcela})
+        contrib.sort(key=lambda c: -abs(c["contribuicao"]))
+        return total, contrib
+
+    # ----------------------------------------------------------- calibração
+    def rendimento_municipal_real(self, cod_municipio, cultura, ano):
+        """Rendimento que o município de fato teve naquela safra (PAM/IBGE)."""
+        for l in self.linhas:
+            if l["m"] == cod_municipio and l["c"] == cultura and l["s"] == ano:
+                return l["real"]
+        return None
+
+    def fator_produtor(self, historico, cod_municipio, cultura):
+        """Quanto o produtor rende acima ou abaixo do município dele.
+
+        `historico` é uma lista de pares (ano, rendimento_dele). Cada safra
+        informada é comparada ao rendimento REAL do município NAQUELE MESMO
+        ano — comparar com outro ano mediria a diferença entre safras, não a
+        diferença entre o produtor e a região dele.
+
+        Com menos de duas safras não há fator: uma só é anedota, não padrão.
+        """
+        razoes, usadas, ignoradas = [], [], []
+        for ano, rend in historico:
+            mun = self.rendimento_municipal_real(cod_municipio, cultura, ano)
+            if mun and mun > 0:
+                razoes.append(rend / mun)
+                usadas.append({"ano": ano, "produtor": rend, "municipio": mun,
+                               "razao": rend / mun})
+            else:
+                ignoradas.append(ano)
+        if len(razoes) < 2:
+            return 1.0, usadas, ignoradas, None
+        return float(np.mean(razoes)), usadas, ignoradas, float(np.std(razoes))
+
+    # Faixa plausível para o fator. Fora dela, quase sempre é erro de unidade:
+    # o produtor informou sacas da área toda em vez de sacas por hectare, ou
+    # quilos em vez de sacas. Vale avisar em vez de aplicar um fator absurdo.
+    FATOR_MIN, FATOR_MAX = 0.55, 1.80
+
+    @classmethod
+    def fator_suspeito(cls, fator, usadas):
+        if fator == 1.0 or not usadas:
+            return None
+        if fator > cls.FATOR_MAX:
+            return (f"O histórico informado dá um fator de {fator:.2f}x — o produtor "
+                    f"renderia {fator:.1f} vezes a média do município dele. É possível, "
+                    "mas o mais comum é o valor ter sido digitado em sacas da área "
+                    "toda, e não em sacas por hectare. Confira antes de usar.")
+        if fator < cls.FATOR_MIN:
+            return (f"O histórico informado dá um fator de {fator:.2f}x — o produtor "
+                    "renderia bem abaixo da média do município. Confira se os valores "
+                    "estão em sacas por hectare.")
+        return None
+
+    # ------------------------------------------------------------- resultado
+    def calcular(self, idx, area_ha, momento="M3", historico=None,
+                 preco=None, custo_ha=None):
+        linha = self.linhas[idx]
+        cult = linha["c"]
+        rend_mun, contrib = self.prever_rendimento(idx, momento)
+        fator, usadas, ignoradas, disp = self.fator_produtor(
+            historico or [], linha["m"], cult)
+        rend = rend_mun * fator
+
+        preco = PRECO_REF[cult] if preco is None else preco
+        custo_ha = CUSTO_REF[cult] if custo_ha is None else custo_ha
+
+        res = self.d["momentos"][momento]["residuo"][cult]
+        todos = np.array(res["todos"]) * fator   # resíduo escala com o fator
+
+        # resíduo = previsto - realizado, então realizado = previsto - resíduo
+        faixa = {
+            "p10": rend - np.percentile(todos, 90),
+            "p25": rend - np.percentile(todos, 75),
+            "p50": rend - np.percentile(todos, 50),
+            "p75": rend - np.percentile(todos, 25),
+            "p90": rend - np.percentile(todos, 10),
+        }
+        equilibrio = custo_ha / preco if preco else float("inf")
+        # distribuição empírica do realizado, para a probabilidade de prejuízo
+        realizados = rend - todos
+        p_abaixo = float((realizados < equilibrio).mean())
+
+        def financeiro(r_ha):
+            sacas = r_ha * area_ha
+            receita = sacas * preco
+            custo = custo_ha * area_ha
+            return {"rendimento_sacas_ha": r_ha, "sacas_totais": sacas,
+                    "receita": receita, "custo": custo, "lucro": receita - custo,
+                    "margem_pct": 100 * (receita - custo) / receita if receita else 0.0}
+
+        return {
+            "municipio": linha["nome"], "uf": linha["uf"], "cultura": cult,
+            "safra": linha["s"], "area_ha": area_ha, "momento": momento,
+            "rendimento_municipal": rend_mun,
+            "fator_produtor": fator, "safras_usadas": usadas,
+            "safras_ignoradas": ignoradas, "dispersao_fator": disp,
+            "preco_saca": preco, "custo_hectare": custo_ha,
+            "ponto_equilibrio_sacas_ha": equilibrio,
+            "prob_abaixo_equilibrio": p_abaixo,
+            "central": financeiro(rend),
+            "pessimista": financeiro(faixa["p10"]),
+            "provavel_baixo": financeiro(faixa["p25"]),
+            "provavel_alto": financeiro(faixa["p75"]),
+            "otimista": financeiro(faixa["p90"]),
+            "realizado_sacas_ha": linha["real"],
+            "media_historica_sacas_ha": linha["hist"],
+            "contribuicoes": contrib[:12],
+        }
+
+
+def brl(v):
+    s = f"{abs(v):,.2f}".replace(",", "~").replace(".", ",").replace("~", ".")
+    return ("-R$ " if v < 0 else "R$ ") + s
+
+
+==============================================================================
+ARQUIVO: treinar_export.py
+==============================================================================
+
+# -*- coding: utf-8 -*-
+"""Treina os 3 momentos, exporta coeficientes, escalas e quantis de resíduo."""
+import warnings, json, numpy as np, pandas as pd
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.linear_model import ElasticNet
+from sklearn.model_selection import GroupKFold, GridSearchCV
+warnings.filterwarnings("ignore")
+S = 42
+ARQUIVO_MODELO = "df_tcc_modelo.xlsx"     # saída do alvo_produtividade_5.ipynb
+SAIDA = "modelo_export.json"              # entrada da calculadora
+
+# Os MESMOS dois filtros do notebook de modelagem. Se divergirem, a calculadora
+# estaria rodando sobre uma base diferente da que produziu os resultados.
+MIN_COBERTURA_CICLO = 0.80
+FAIXAS_SACAS = {"Soja (em grão)": (15, 100), "Milho (em grão)": (20, 250),
+                "Trigo (em grão)": (10, 100)}
+
+df = pd.read_excel(ARQUIVO_MODELO, sheet_name="modelo")
+print(f"Bruto: {len(df)} linhas")
+df = df[df["cobertura_ciclo"] >= MIN_COBERTURA_CICLO].copy()
+mascara = pd.Series(False, index=df.index)
+for cultura, (lo, hi) in FAIXAS_SACAS.items():
+    mascara |= ((df["cultura_tcc"] == cultura) &
+                df["rendimento_sacas_ha"].between(lo, hi))
+df = df[mascara].copy()
+print(f"Após filtros: {len(df)} linhas | {df['cod_municipio'].nunique()} municípios")
+
+# Guarda de sanidade: a mesma do notebook de modelagem. Zeros impossíveis aqui
+# significam que o notebook do alvo rodou sem agregar_coluna(min_count=1).
+impossivel = [c for c in df.columns
+              if c.endswith(("graus_dia_acum", "radiacao_total_mjm2"))
+              and not c.startswith("ciclo_")]
+com_zero = int((df[impossivel] == 0).any(axis=1).sum())
+if com_zero:
+    raise AssertionError(
+        f"{com_zero} linhas com zero impossível em {len(impossivel)} colunas. "
+        "Reexecute alvo_produtividade_5.ipynb com agregar_coluna() antes de treinar.")
+print("OK: nenhum zero fabricado.")
+
+df = df.sort_values(["cod_municipio", "cultura_tcc", "ano_pam"]).reset_index(drop=True)
+
+# média histórica expansiva (só safras anteriores)
+g = df.groupby(["cod_municipio", "cultura_tcc"])["rendimento_sacas_ha"]
+df["base_hist"] = g.apply(lambda s: s.shift().expanding().mean()).reset_index(level=[0,1], drop=True)
+ufp = (df.sort_values("ano_pam").groupby(["UF","cultura_tcc"])["rendimento_sacas_ha"]
+         .apply(lambda s: s.shift().expanding().mean()).reset_index(level=[0,1], drop=True))
+df["base_hist"] = df.base_hist.fillna(ufp).fillna(df.rendimento_sacas_ha.mean())
+
+SOLO = ["retencao_agua","drenagem","aptidao_graos","profundidade","risco_erosao"]
+MOM = {"M1":["vegetativo_"], "M2":["vegetativo_","floracao_"],
+       "M3":["vegetativo_","floracao_","enchimento_"]}
+def cols(pref):
+    return [c for c in df.columns if any(c.startswith(p) for p in pref)] + \
+           [c for c in SOLO if c in df.columns] + ["base_hist"]
+
+y = df.rendimento_sacas_ha.values.astype(float)
+gr = df.cod_municipio.values
+GRADE = {"m__alpha":[0.001,0.01,0.1,0.5,1.0,5.0],
+         "m__l1_ratio":[0.1,0.3,0.5,0.7,0.9,0.95]}
+EXPORT = {"momentos": {}}
+
+for nome, pref in MOM.items():
+    cs = cols(pref); X = df[cs]
+    med = X.median(numeric_only=True)
+    Xf = X.fillna(med)
+    # previsões fora da amostra, para os quantis de resíduo
+    oos = np.full(len(y), np.nan)
+    for tr, te in GroupKFold(n_splits=5).split(np.arange(len(y)), groups=gr):
+        mtr = X.iloc[tr].median(numeric_only=True)
+        b = GridSearchCV(Pipeline([("e",MinMaxScaler()),("m",ElasticNet(max_iter=20000,random_state=S))]),
+                         GRADE, cv=GroupKFold(n_splits=4),
+                         scoring="neg_root_mean_squared_error", n_jobs=-1)
+        b.fit(X.iloc[tr].fillna(mtr), y[tr], groups=gr[tr])
+        oos[te] = b.predict(X.iloc[te].fillna(mtr))
+    # modelo final na base inteira
+    fin = GridSearchCV(Pipeline([("e",MinMaxScaler()),("m",ElasticNet(max_iter=20000,random_state=S))]),
+                       GRADE, cv=GroupKFold(n_splits=5),
+                       scoring="neg_root_mean_squared_error", n_jobs=-1)
+    fin.fit(Xf, y, groups=gr)
+    esc = fin.best_estimator_.named_steps["e"]; mod = fin.best_estimator_.named_steps["m"]
+    rmse = float(np.sqrt(np.mean((oos-y)**2)))
+    EXPORT["momentos"][nome] = {
+        "variaveis": cs,
+        "min": [float(v) for v in esc.data_min_],
+        "range": [float(v) if v else 1.0 for v in (esc.data_max_-esc.data_min_)],
+        "coef": [round(float(v),6) for v in mod.coef_],
+        "intercept": float(mod.intercept_),
+        "mediana": [float(med.get(c,0.0)) for c in cs],
+        "alpha": float(fin.best_params_["m__alpha"]),
+        "l1_ratio": float(fin.best_params_["m__l1_ratio"]),
+        "rmse_oos": round(rmse,3),
+        "zeradas": int((mod.coef_==0).sum()),
+    }
+    # quantis do resíduo relativo, por cultura
+    res = {}
+    for cult, sub in df.assign(_p=oos).groupby("cultura_tcc"):
+        r = (sub._p - sub.rendimento_sacas_ha).values
+        r = r[~np.isnan(r)]
+        res[cult] = {"q10":round(float(np.percentile(r,10)),2),
+                     "q25":round(float(np.percentile(r,25)),2),
+                     "q50":round(float(np.percentile(r,50)),2),
+                     "q75":round(float(np.percentile(r,75)),2),
+                     "q90":round(float(np.percentile(r,90)),2),
+                     "dp":round(float(np.std(r)),2),"n":int(len(r)),
+                     "todos":[round(float(v),2) for v in np.sort(r)]}
+    EXPORT["momentos"][nome]["residuo"] = res
+    print(f"{nome}: {len(cs)} vars | RMSE oos {rmse:.2f} | alpha {fin.best_params_['m__alpha']} "
+          f"l1 {fin.best_params_['m__l1_ratio']} | {int((mod.coef_==0).sum())} zeradas")
+
+# linhas disponíveis para simulação
+linhas = []
+for r in df.itertuples():
+    linhas.append({"m": int(r.cod_municipio), "nome": r.municipio_ibge, "uf": r.UF,
+                   "c": r.cultura_tcc, "s": int(r.ano_pam),
+                   "real": round(float(r.rendimento_sacas_ha),2),
+                   "hist": round(float(r.base_hist),2)})
+EXPORT["linhas"] = linhas
+# valores das variáveis por linha, na ordem de M3 (M1 e M2 são prefixos do mesmo conjunto)
+ordem = EXPORT["momentos"]["M3"]["variaveis"]
+vals = df[ordem].astype(float)
+EXPORT["ordem_m3"] = ordem
+EXPORT["valores"] = [[None if pd.isna(v) else round(float(v),3) for v in row] for row in vals.values]
+json.dump(EXPORT, open(SAIDA, "w"), ensure_ascii=False)
+import os
+print(f"{SAIDA}: {round(os.path.getsize(SAIDA)/1024)} KB — pronto para a calculadora")
+
+
+==============================================================================
+ARQUIVO: robustez.py
+==============================================================================
+
+# -*- coding: utf-8 -*-
+"""Análise de robustez — os três testes que qualificam a conclusão.
+
+Roda depois da modelagem e responde três perguntas que a banca pode fazer e
+que a tabela de desempenho sozinha não responde:
+
+  1. O ganho sobre o método tradicional sobrevive a um baseline que recebe a
+     MESMA informação de ano que o modelo recebe?
+  2. O modelo acerta a safra de quebra quando precisa PREVÊ-LA, e não apenas
+     quando já viu outros municípios passarem por ela?
+  3. O valor do modelo se concentra nos anos de clima atípico?
+
+Entrada : df_tcc_modelo.xlsx  (saída do alvo_produtividade_5.ipynb)
+Saída   : robustez.xlsx  +  relatório no console
+
+Tempo   : ~4 minutos.
+"""
+import warnings
+import numpy as np
+import pandas as pd
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.linear_model import ElasticNet
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import GroupKFold, GridSearchCV
+
+warnings.filterwarnings("ignore")
+
+ARQUIVO = "df_tcc_modelo.xlsx"
+SAIDA = "robustez.xlsx"
+SEMENTE = 42
+MIN_COBERTURA_CICLO = 0.80
+FAIXAS_SACAS = {"Soja (em grão)": (15, 100), "Milho (em grão)": (20, 250),
+                "Trigo (em grão)": (10, 100)}
+COLUNAS_SOLO = ["retencao_agua", "drenagem", "aptidao_graos", "profundidade", "risco_erosao"]
+# O caso que a banca vai perguntar: a seca do Rio Grande do Sul.
+CASO = {"UF": "RS", "ano_pam": 2022, "cultura": "Soja (em grão)"}
+
+
+# ------------------------------------------------------------------ carga ---
+def carregar():
+    df = pd.read_excel(ARQUIVO, sheet_name="modelo")
+    df = df[df["cobertura_ciclo"] >= MIN_COBERTURA_CICLO].copy()
+    m = pd.Series(False, index=df.index)
+    for cultura, (lo, hi) in FAIXAS_SACAS.items():
+        m |= (df["cultura_tcc"] == cultura) & df["rendimento_sacas_ha"].between(lo, hi)
+    df = df[m].sort_values(["cod_municipio", "cultura_tcc", "ano_pam"]).reset_index(drop=True)
+
+    g = df.groupby(["cod_municipio", "cultura_tcc"])["rendimento_sacas_ha"]
+    df["base_hist"] = (g.apply(lambda s: s.shift().expanding().mean())
+                        .reset_index(level=[0, 1], drop=True))
+    uf = (df.sort_values("ano_pam").groupby(["UF", "cultura_tcc"])["rendimento_sacas_ha"]
+            .apply(lambda s: s.shift().expanding().mean())
+            .reset_index(level=[0, 1], drop=True))
+    df["base_hist"] = df.base_hist.fillna(uf).fillna(df.rendimento_sacas_ha.mean())
+
+    # Método tradicional BEM ESPECIFICADO: a média do município escalada pelo
+    # fator do ano na região, estimado leave-one-out nos demais municípios.
+    k = ["UF", "cultura_tcc", "ano_pam"]
+    sr = df.groupby(k)["rendimento_sacas_ha"].transform("sum")
+    sh = df.groupby(k)["base_hist"].transform("sum")
+    fator = ((sr - df.rendimento_sacas_ha) / (sh - df.base_hist).replace(0, np.nan))
+    df["base_indexada"] = (df.base_hist * fator.fillna(1.0)).fillna(df.base_hist)
+    return df
+
+
+def modelos(semente=SEMENTE):
+    return {
+        "elastic_net": (
+            Pipeline([("e", MinMaxScaler()),
+                      ("m", ElasticNet(max_iter=20000, random_state=semente))]),
+            {"m__alpha": [0.001, 0.01, 0.1, 0.5, 1.0, 5.0],
+             "m__l1_ratio": [0.1, 0.3, 0.5, 0.7, 0.9, 0.95]}),
+        "random_forest": (
+            Pipeline([("m", RandomForestRegressor(n_estimators=200, random_state=semente,
+                                                  n_jobs=-1))]),
+            {"m__max_depth": [8, 15, None], "m__min_samples_leaf": [1, 5, 10]}),
+    }
+
+
+def prever(df, esquema):
+    """Previsões fora da amostra em cada esquema de validação."""
+    cols = ([c for c in df.columns
+             if c.startswith(("vegetativo_", "floracao_", "enchimento_"))]
+            + [c for c in COLUNAS_SOLO if c in df.columns] + ["base_hist"])
+    X, y = df[cols], df.rendimento_sacas_ha.values.astype(float)
+    gr, idx = df.cod_municipio.values, np.arange(len(df))
+    safras = np.sort(df.ano_pam.unique())
+
+    def particoes():
+        if esquema == "espacial":
+            yield from GroupKFold(n_splits=5).split(idx, groups=gr)
+        else:
+            for s in safras[1:]:
+                tr, te = idx[df.ano_pam.values < s], idx[df.ano_pam.values == s]
+                if len(tr) >= 50 and len(te):
+                    yield tr, te
+
+    saida = {}
+    for nome, (pipe, grade) in modelos().items():
+        pv = np.full(len(y), np.nan)
+        for tr, te in particoes():
+            med = X.iloc[tr].median(numeric_only=True)
+            b = GridSearchCV(pipe, grade, cv=GroupKFold(n_splits=4),
+                             scoring="neg_root_mean_squared_error", n_jobs=-1)
+            b.fit(X.iloc[tr].fillna(med), y[tr], groups=gr[tr])
+            pv[te] = b.predict(X.iloc[te].fillna(med))
+        saida[nome] = pv
+        print(f"   {esquema}/{nome}: pronto")
+    return saida
+
+
+def rmse(p, y):
+    p, y = np.asarray(p, float), np.asarray(y, float)
+    ok = ~np.isnan(p)
+    return float(np.sqrt(((p[ok] - y[ok]) ** 2).mean()))
+
+
+# --------------------------------------------------------------------- main --
+print("Carregando...")
+df = carregar()
+y = df.rendimento_sacas_ha.values.astype(float)
+print(f"{len(df)} linhas | {df.cod_municipio.nunique()} municípios | "
+      f"safras {sorted(df.ano_pam.unique())}\n")
+
+print("Treinando (demora alguns minutos)...")
+esp = prever(df, "espacial")
+tmp = prever(df, "temporal")
+df["prev_esp_en"], df["prev_esp_rf"] = esp["elastic_net"], esp["random_forest"]
+df["prev_tmp_en"], df["prev_tmp_rf"] = tmp["elastic_net"], tmp["random_forest"]
+
+# ---- 1. o ganho sobrevive a um baseline que sabe o ano? --------------------
+print("\n" + "=" * 70)
+print("1. O GANHO SOBREVIVE A UM BASELINE QUE SABE O ANO?")
+print("=" * 70)
+t1 = pd.DataFrame([
+    {"metodo": "média histórica do município", "rmse": rmse(df.base_hist, y)},
+    {"metodo": "média histórica INDEXADA pelo ano", "rmse": rmse(df.base_indexada, y)},
+    {"metodo": "Elastic Net M3 (espacial)", "rmse": rmse(df.prev_esp_en, y)},
+    {"metodo": "Random Forest M3 (espacial)", "rmse": rmse(df.prev_esp_rf, y)},
+])
+print(t1.round(2).to_string(index=False))
+r_pura, r_idx = rmse(df.base_hist, y), rmse(df.base_indexada, y)
+r_en = rmse(df.prev_esp_en, y)
+print(f"\n  Elastic Net contra a média pura     : {100*(r_pura-r_en)/r_pura:+6.1f}%")
+print(f"  Elastic Net contra a média indexada : {100*(r_idx-r_en)/r_idx:+6.1f}%  <- o número honesto")
+print("\n  A diferença entre os dois é o valor de saber que ano é, que qualquer")
+print("  método tradicional consegue e não é mérito do modelo climático.")
+
+# ---- 2. a safra de quebra, nos dois esquemas ------------------------------
+print("\n" + "=" * 70)
+print(f"2. A SAFRA DE QUEBRA — {CASO['UF']} {CASO['ano_pam']}, {CASO['cultura']}")
+print("=" * 70)
+s = df[(df.UF == CASO["UF"]) & (df.ano_pam == CASO["ano_pam"]) &
+       (df.cultura_tcc == CASO["cultura"])]
+ys = s.rendimento_sacas_ha.values
+t2 = pd.DataFrame([
+    {"metodo": "média histórica", "previsto": s.base_hist.mean(), "rmse": rmse(s.base_hist, ys)},
+    {"metodo": "média INDEXADA pelo ano", "previsto": s.base_indexada.mean(), "rmse": rmse(s.base_indexada, ys)},
+    {"metodo": "Elastic Net — espacial", "previsto": s.prev_esp_en.mean(), "rmse": rmse(s.prev_esp_en, ys)},
+    {"metodo": "Elastic Net — temporal", "previsto": s.prev_tmp_en.mean(), "rmse": rmse(s.prev_tmp_en, ys)},
+])
+print(f"  {len(s)} municípios | realizado médio {ys.mean():.1f} sacas/ha\n")
+print(t2.round(2).to_string(index=False))
+print("\n  No esquema ESPACIAL o modelo já tinha visto a seca em outros municípios.")
+print("  No TEMPORAL, que é a previsão de verdade, ele só viu as safras anteriores.")
+
+# ---- 3. o valor se concentra nos anos de clima atípico? -------------------
+print("\n" + "=" * 70)
+print("3. O VALOR SE CONCENTRA NOS ANOS DE CLIMA ATÍPICO?")
+print("=" * 70)
+d = df[df.prev_tmp_en.notna()].copy()
+comp = []
+for col in ["ciclo_precipitacao_total_mm", "ciclo_temp_max_abs", "ciclo_graus_dia_acum"]:
+    if col not in d.columns:
+        continue
+    g = d.groupby(["cod_municipio", "cultura_tcc"])[col]
+    d["z_" + col] = ((d[col] - g.transform("mean")) /
+                     g.transform("std").replace(0, np.nan)).abs()
+    comp.append("z_" + col)
+d["anom_clima"] = d[comp].max(axis=1)
+d = d.dropna(subset=["anom_clima"])
+d["err_trad"] = (d.base_hist - d.rendimento_sacas_ha).abs()
+d["err_en"] = (d.prev_tmp_en - d.rendimento_sacas_ha).abs()
+d["faixa"] = pd.qcut(d.anom_clima, 4, labels=["1 normal", "2", "3", "4 anômalo"])
+t3 = d.groupby("faixa", observed=True).agg(
+    n=("anom_clima", "size"), z_mediano=("anom_clima", "median"),
+    mae_trad=("err_trad", "mean"), mae_en=("err_en", "mean"))
+t3["ganho_pct"] = 100 * (t3.mae_trad - t3.mae_en) / t3.mae_trad
+print(t3.round(2).to_string())
+print("\n  A anomalia é medida pelo CLIMA, não pelo desvio do rendimento. Medir pelo")
+print("  rendimento seria circular: a variável de agrupamento seria o próprio erro")
+print("  do método tradicional, e o grupo 'normal' seria, por definição, onde a")
+print("  média acerta.")
+
+with pd.ExcelWriter(SAIDA, engine="openpyxl") as w:
+    t1.round(3).to_excel(w, sheet_name="1_baseline_justo", index=False)
+    t2.round(3).to_excel(w, sheet_name="2_safra_de_quebra", index=False)
+    t3.round(3).to_excel(w, sheet_name="3_anomalia_climatica")
+    df[["cod_municipio", "municipio_ibge", "UF", "cultura_tcc", "ano_pam",
+        "rendimento_sacas_ha", "base_hist", "base_indexada",
+        "prev_esp_en", "prev_esp_rf", "prev_tmp_en", "prev_tmp_rf"]].to_excel(
+        w, sheet_name="previsoes", index=False)
+print(f"\n{SAIDA} gravado.")
+
+
+==============================================================================
+ARQUIVO: graficos_resultados.py
+==============================================================================
+
+# -*- coding: utf-8 -*-
+"""Figuras do capítulo de resultados. Todos os valores vêm de res_final.json,
+robustez.xlsx e coef_final.json — nenhum número é digitado aqui à mão."""
+import json
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from matplotlib.lines import Line2D
+
+AZUL, LARANJA, AQUA, VERMELHO = "#2a78d6", "#eb6834", "#1baf7a", "#e34948"
+TINTA, SEC, MUDO = "#0b0b0b", "#52514e", "#898781"
+GRADE, EIXO, FUNDO = "#e1e0d9", "#c3c2b7", "#fcfcfb"
+
+def br(x, casas=2):
+    """Vírgula decimal, como manda a norma — o texto do capítulo usa vírgula e a
+    figura não pode usar ponto."""
+    return f"{x:.{casas}f}".replace(".", ",")
+
+
+def br_eixo(x, _pos=None):
+    return f"{x:g}".replace(".", ",")
+
+
+plt.rcParams.update({
+    "font.family": "DejaVu Sans", "font.size": 9,
+    "figure.facecolor": FUNDO, "axes.facecolor": FUNDO,
+    "axes.edgecolor": EIXO, "axes.labelcolor": SEC,
+    "xtick.color": MUDO, "ytick.color": MUDO,
+    "axes.grid": False, "savefig.facecolor": FUNDO,
+})
+
+R = json.load(open("res_final.json"))
+COEF = json.load(open("coef_final.json"))
+XB = pd.ExcelFile("robustez.xlsx")
+BASE = XB.parse("1_baseline_justo")
+QUEBRA = XB.parse("2_safra_de_quebra")
+ANOM = XB.parse("3_anomalia_climatica")
+PREV = XB.parse("previsoes")
+
+
+def limpar(ax, grade_x=False, grade_y=True):
+    for lado in ("top", "right"):
+        ax.spines[lado].set_visible(False)
+    for lado in ("left", "bottom"):
+        ax.spines[lado].set_color(EIXO)
+        ax.spines[lado].set_linewidth(.8)
+    if grade_y:
+        ax.set_axisbelow(True)
+        ax.yaxis.grid(True, color=GRADE, linewidth=.8)
+    if grade_x:
+        ax.set_axisbelow(True)
+        ax.xaxis.grid(True, color=GRADE, linewidth=.8)
+
+
+def eixos_br(ax, x=True, y=True):
+    from matplotlib.ticker import FuncFormatter
+    if x: ax.xaxis.set_major_formatter(FuncFormatter(br_eixo))
+    if y: ax.yaxis.set_major_formatter(FuncFormatter(br_eixo))
+
+
+def salvar(fig, nome):
+    fig.savefig(nome, dpi=300, bbox_inches="tight", pad_inches=.12)
+    plt.close(fig)
+    print("   ", nome)
+
+
+# ---------------------------------------------------------------- figura 1 --
+# Magnitude, série única: erro de cada método no esquema espacial.
+def fig1():
+    d = BASE.sort_values("rmse", ascending=False)
+    rot = {"média histórica do município": "Média histórica\ndo município",
+           "média histórica INDEXADA pelo ano": "Média histórica\nindexada pelo ano",
+           "Elastic Net M3 (espacial)": "Elastic Net\n(ciclo completo)",
+           "Random Forest M3 (espacial)": "Random Forest\n(ciclo completo)"}
+    nomes = [rot[m] for m in d.metodo]
+    cores = [MUDO if "média" in m else AZUL for m in d.metodo]
+    fig, ax = plt.subplots(figsize=(6.3, 3.2))
+    y = np.arange(len(d))
+    ax.barh(y, d.rmse, height=.62, color=cores, zorder=3)
+    for i, v in enumerate(d.rmse):
+        ax.text(v + .18, i, br(v), va="center", ha="left",
+                fontsize=9, color=TINTA, fontweight="bold")
+    ax.set_yticks(y, nomes, fontsize=8.5, color=SEC)
+    ax.set_xlim(0, d.rmse.max() * 1.16)
+    ax.set_xlabel("RMSE (sacas por hectare) — menor é melhor")
+    limpar(ax, grade_x=True, grade_y=False)
+    ax.text(0, len(d) - .35, "métodos tradicionais em cinza", fontsize=8,
+            color=MUDO, style="italic")
+    eixos_br(ax, y=False)
+    salvar(fig, "fig1_baseline.png")
+
+
+# ---------------------------------------------------------------- figura 2 --
+# Duas séries: o mesmo modelo nos dois esquemas de validação.
+def fig2():
+    pares = [("Elastic Net", R["espacial|M3_completo|com_hist|elastic_net"]["RMSE"],
+              R["temporal|M3_completo|com_hist|elastic_net"]["RMSE"]),
+             ("Média histórica", R["espacial|tradicional|com_hist|media_historica"]["RMSE"],
+              R["temporal|tradicional|com_hist|media_historica"]["RMSE"])]
+    x = np.arange(2)
+    larg = .34
+    fig, ax = plt.subplots(figsize=(6.3, 3.4))
+    esp = [p[1] for p in pares]
+    tmp = [p[2] for p in pares]
+    b1 = ax.bar(x - larg / 2 - .01, esp, larg, label="Município novo (espacial)",
+                color=AZUL, zorder=3)
+    b2 = ax.bar(x + larg / 2 + .01, tmp, larg, label="Próxima safra (temporal)",
+                color=LARANJA, zorder=3)
+    for bs in (b1, b2):
+        for b in bs:
+            ax.text(b.get_x() + b.get_width() / 2, b.get_height() + .3,
+                    br(b.get_height()), ha="center", fontsize=8.8,
+                    color=TINTA, fontweight="bold")
+    ax.set_xticks(x, [p[0] for p in pares], fontsize=9.5, color=TINTA)
+    ax.set_ylabel("RMSE (sacas por hectare)")
+    ax.set_ylim(0, max(esp + tmp) * 1.22)
+    ax.legend(frameon=False, fontsize=8.5, loc="upper center",
+              bbox_to_anchor=(.5, 1.16), ncol=2, labelcolor=SEC)
+    limpar(ax)
+    eixos_br(ax, x=False)
+    salvar(fig, "fig2_esquemas.png")
+
+
+# ---------------------------------------------------------------- figura 3 --
+# Mudança ao longo do ciclo: duas séries, com e sem o histórico do município.
+def fig3():
+    etapas = ["M1\nvegetativo", "M2\naté floração", "M3\nciclo completo"]
+    ch = [R[f"espacial|{m}|com_hist|elastic_net"]["RMSE"]
+          for m in ("M1_vegetativo", "M2_floracao", "M3_completo")]
+    sc = [R[f"espacial|{m}|so_clima|elastic_net"]["RMSE"]
+          for m in ("M1_vegetativo", "M2_floracao", "M3_completo")]
+    x = np.arange(3)
+    fig, ax = plt.subplots(figsize=(6.3, 3.4))
+    ax.plot(x, sc, "-o", color=LARANJA, linewidth=2, markersize=8,
+            markeredgecolor=FUNDO, markeredgewidth=2, zorder=3,
+            label="Apenas clima")
+    ax.plot(x, ch, "-s", color=AZUL, linewidth=2, markersize=8,
+            markeredgecolor=FUNDO, markeredgewidth=2, zorder=3,
+            label="Clima + histórico do município")
+    for i, (a, b) in enumerate(zip(sc, ch)):
+        ax.text(i, a + .55, br(a), ha="center", fontsize=8.6, color=TINTA)
+        ax.text(i, b - .95, br(b), ha="center", fontsize=8.6, color=TINTA)
+    ax.set_xticks(x, etapas, fontsize=9, color=TINTA)
+    ax.set_xlim(-.35, 2.35)
+    ax.set_ylabel("RMSE (sacas por hectare)")
+    ax.set_ylim(min(ch) - 2.6, max(sc) + 2.2)
+    ax.legend(frameon=False, fontsize=8.5, loc="upper center",
+              bbox_to_anchor=(.5, 1.16), ncol=2, labelcolor=SEC)
+    limpar(ax)
+    eixos_br(ax, x=False)
+    salvar(fig, "fig3_ciclo.png")
+
+
+# ---------------------------------------------------------------- figura 4 --
+# Identidade: previsto contra observado, uma cor por cultura (3 séries).
+def fig4():
+    cores = {"Soja (em grão)": AZUL, "Milho (em grão)": LARANJA,
+             "Trigo (em grão)": AQUA}
+    marcas = {"Soja (em grão)": "o", "Milho (em grão)": "^", "Trigo (em grão)": "s"}
+    fig, ax = plt.subplots(figsize=(5.0, 5.0))
+    lim = [0, max(PREV.rendimento_sacas_ha.max(), PREV.prev_esp_en.max()) * 1.05]
+    ax.plot(lim, lim, color=MUDO, linewidth=1, linestyle=(0, (5, 4)), zorder=2)
+    ax.text(lim[1] * .60, lim[1] * .655, "previsão perfeita", fontsize=8,
+            color=MUDO, rotation=38, style="italic")
+    for cult, cor in cores.items():
+        s = PREV[PREV.cultura_tcc == cult]
+        ax.scatter(s.rendimento_sacas_ha, s.prev_esp_en, s=15, c=cor,
+                   marker=marcas[cult], alpha=.62, linewidths=0, zorder=3,
+                   label=cult.replace(" (em grão)", ""))
+    ax.set_xlim(lim)
+    ax.set_ylim(lim)
+    ax.set_aspect("equal")
+    ax.set_xlabel("Rendimento observado (sacas/ha)")
+    ax.set_ylabel("Rendimento previsto (sacas/ha)")
+    r2 = R["espacial|M3_completo|com_hist|elastic_net"]["R2"]
+    ax.text(.04, .95, f"R² = {br(r2, 3)}   n = {len(PREV)}", transform=ax.transAxes,
+            fontsize=9, color=TINTA, fontweight="bold", va="top")
+    ax.legend(frameon=False, fontsize=8.5, loc="lower right", labelcolor=SEC,
+              handletextpad=.3)
+    limpar(ax, grade_x=True)
+    eixos_br(ax)
+    salvar(fig, "fig4_dispersao.png")
+
+
+# ---------------------------------------------------------------- figura 5 --
+# Polaridade: coeficientes, azul positivo e vermelho negativo.
+ESTADIO = {"vegetativo": "vegetativo", "floracao": "floração",
+           "enchimento": "enchimento"}
+VARIAVEL = {
+    "temp_max_abs": "temp. máxima absoluta", "temp_min_abs": "temp. mínima absoluta",
+    "temp_media": "temperatura média", "graus_dia_acum": "graus-dia acumulados",
+    "amplitude_termica": "amplitude térmica", "vpd_medio_kpa": "VPD médio",
+    "vpd_max_kpa": "VPD máximo", "umidade_min_abs": "umidade mínima absoluta",
+    "umidade_media": "umidade média", "precipitacao_total_mm": "precipitação total",
+    "radiacao_total_mjm2": "radiação total", "cobertura": "cobertura de medição",
+    "maior_veranico": "maior veranico", "dias_com_chuva": "dias com chuva",
+}
+
+
+def rotular(nome):
+    """Traduz o nome técnico da coluna para leitura humana, sem inventar: o
+    prefixo é o estádio fenológico e o resto é a variável climática."""
+    if nome == "base_hist":
+        return "histórico do município"
+    for pref, leg in ESTADIO.items():
+        if nome.startswith(pref + "_"):
+            resto = nome[len(pref) + 1:]
+            return f"{leg} · {VARIAVEL.get(resto, resto.replace('_', ' '))}"
+    return VARIAVEL.get(nome, nome.replace("_", " "))
+
+
+def fig5():
+    top = sorted(COEF, key=lambda c: -abs(c[1]))[:12][::-1]
+    nomes = [rotular(n) for n, _ in top]
+    vals = [v for _, v in top]
+    cores = [AZUL if v > 0 else VERMELHO for v in vals]
+    fig, ax = plt.subplots(figsize=(6.3, 4.4))
+    y = np.arange(len(top))
+    ax.barh(y, vals, height=.64, color=cores, zorder=3)
+    for i, v in enumerate(vals):
+        ax.text(v + (2.5 if v > 0 else -2.5), i, ("+" if v > 0 else "\u2212") + br(abs(v), 1), va="center",
+                ha="left" if v > 0 else "right", fontsize=8.4, color=TINTA)
+    ax.set_yticks(y, nomes, fontsize=8.2, color=SEC)
+    ax.axvline(0, color=EIXO, linewidth=.9)
+    ax.set_xlabel("Coeficiente padronizado")
+    m = max(abs(min(vals)), abs(max(vals))) * 1.22
+    ax.set_xlim(-m, m)
+    limpar(ax, grade_x=True, grade_y=False)
+    nz = sum(1 for _, v in COEF if abs(v) < 1e-9)
+    ax.text(.0, 1.04, f"{len(COEF) - nz} de {len(COEF)} variáveis mantidas; "
+            f"{nz} zeradas pela penalização", transform=ax.transAxes,
+            fontsize=8, color=MUDO, style="italic")
+    legenda = [Line2D([0], [0], marker="s", color="none", markerfacecolor=AZUL,
+                      markersize=8, label="aumenta o rendimento"),
+               Line2D([0], [0], marker="s", color="none", markerfacecolor=VERMELHO,
+                      markersize=8, label="reduz o rendimento")]
+    ax.legend(handles=legenda, frameon=False, fontsize=8.3, loc="lower right",
+              labelcolor=SEC, handletextpad=.3)
+    eixos_br(ax, y=False)
+    salvar(fig, "fig5_coeficientes.png")
+
+
+# ---------------------------------------------------------------- figura 6 --
+# Caso de teste: a quebra de safra, cada método contra o realizado.
+def fig6():
+    d = QUEBRA.copy()
+    rot = {"média histórica": "Média\nhistórica",
+           "média INDEXADA pelo ano": "Média\nindexada",
+           "Elastic Net — espacial": "Elastic Net\nespacial",
+           "Elastic Net — temporal": "Elastic Net\ntemporal"}
+    real = float(json.load(open("_seca.json"))["realizado"])
+    fig, ax = plt.subplots(figsize=(6.3, 3.5))
+    x = np.arange(len(d))
+    # Uma cor por natureza do método — tradicional em cinza, modelo em azul —,
+    # nunca por tamanho do erro: a cor identifica a entidade, não a posição.
+    cores = [MUDO if "média" in m else AZUL for m in d.metodo]
+    ax.bar(x, d.previsto, .56, color=cores, zorder=3)
+    for i, v in enumerate(d.previsto):
+        ax.text(i, v + 1.6, br(v, 1), ha="center", fontsize=9,
+                color=TINTA, fontweight="bold")
+    ax.axhline(real, color=TINTA, linewidth=1.4, linestyle=(0, (5, 3)), zorder=4)
+    ax.text(len(d) - .42, real + 1.8, f"realizado: {br(real, 1)}", ha="right",
+            fontsize=8.8, color=TINTA, fontweight="bold")
+    ax.set_xticks(x, [rot[m] for m in d.metodo], fontsize=8.6, color=TINTA)
+    ax.set_ylabel("Rendimento previsto (sacas/ha)")
+    ax.set_ylim(0, d.previsto.max() * 1.26)
+    ax.text(0, 1.04, "métodos tradicionais em cinza; a linha tracejada é o "
+            "rendimento efetivamente colhido", transform=ax.transAxes,
+            fontsize=8, color=MUDO, style="italic")
+    limpar(ax)
+    eixos_br(ax, x=False)
+    salvar(fig, "fig6_quebra.png")
+
+
+if __name__ == "__main__":
+    print("gerando figuras:")
+    fig1(); fig2(); fig3(); fig4(); fig5(); fig6()
+
+
+==============================================================================
+ARQUIVO: figuras_entidades.py
+==============================================================================
+
+# -*- coding: utf-8 -*-
+"""Gera as figuras do dicionário de dados (Figuras 9 a 14) a partir do
+inventário real do banco. Nada é digitado à mão: o conteúdo de cada figura é
+lido de banco_inventario.txt, que é a saída de banco.py (DESCRIBE por tabela
+mais as chaves estrangeiras do information_schema)."""
+import pathlib
+import re
+import subprocess
+import sys
+
+INVENTARIO = "/mnt/user-data/uploads/TCC/banco_inventario.txt"
+SAIDA = pathlib.Path("/home/claude/tcc/figuras_bd")
+SAIDA.mkdir(exist_ok=True)
+
+# Figura -> entidade, na ordem em que aparecem no TC1.1
+FIGURAS = [
+    (9, "REGIAO", "Municípios e estações meteorológicas monitoradas"),
+    (10, "TIPO_SOLO", "Catálogo pedológico e atributos agronômicos"),
+    (11, "CULTURA", "Culturas suportadas e ciclo estimado"),
+    (12, "CONFIGURACAO_SAFRA", "Parâmetros da safra cadastrada pelo produtor"),
+    (13, "SENSOR_IOT", "Dispositivo de monitoramento instalado em campo"),
+    (14, "LEITURA_IOT", "Medições ambientais coletadas pelo nó sensor"),
+]
+
+CHAVE = {"PRI": ("PK", "#2a78d6"), "UNI": ("UK", "#7b3fb8"),
+         "MUL": ("FK", "#1baf7a")}
+
+
+def parse(texto):
+    """Quebra o inventário em {tabela: {colunas, fks, n_linhas}}."""
+    tabelas = {}
+    blocos = re.split(r"={10,}\n", texto)
+    i = 0
+    while i < len(blocos):
+        cab = blocos[i].strip()
+        m = re.match(r"TABELA (\w+)\s+—\s+([\d,]+) linhas", cab)
+        if m and i + 1 < len(blocos):
+            nome, n = m.group(1), m.group(2)
+            corpo = blocos[i + 1]
+            cols = []
+            for linha in corpo.splitlines():
+                c = re.match(r"\s{3}(\w+)\s{2,}([\w()\s,]+?)\s{2,}"
+                             r"(NOT NULL|NULL)\s*(?:\[(\w+)\])?\s*$", linha)
+                if c:
+                    cols.append({"nome": c.group(1), "tipo": c.group(2).strip(),
+                                 "nulo": c.group(3), "chave": c.group(4)})
+            fks = dict(re.findall(r"\s{3}(\w+) -> ([\w.]+)", corpo))
+            tabelas[nome] = {"colunas": cols, "fks": fks, "linhas": n}
+        i += 1
+    return tabelas
+
+
+CSS = """
+html,body{margin:0;padding:0;background:#fff}
+#alvo{width:760px;padding:26px 26px 18px;background:#fcfcfb;color:#0b0b0b;
+  font-family:"IBM Plex Mono",ui-monospace,monospace}
+.cartao{border:1.5px solid %(cor)s;border-radius:9px;overflow:hidden;background:#fff}
+.topo{background:%(cor)s;color:#fff;padding:10px 16px}
+.topo .nome{font-size:15px;font-weight:600;letter-spacing:.3px}
+.topo .sub{font-size:11px;opacity:.92;margin-top:3px}
+table{width:100%%;border-collapse:collapse;font-size:12px}
+th{text-align:left;font-weight:600;color:#52514e;background:#f2f2f0;
+  padding:7px 16px;border-bottom:1px solid #e1e0d9;font-size:11px;
+  text-transform:uppercase;letter-spacing:.4px}
+td{padding:6px 16px;border-bottom:1px solid #eeede7;vertical-align:top}
+tr:last-child td{border-bottom:none}
+.attr{font-weight:600}
+.tipo{color:#52514e}
+.nulo{color:#898781;font-size:11px}
+.tag{display:inline-block;padding:1px 6px;border-radius:4px;font-size:10px;
+  font-weight:600;color:#fff}
+.rodape{padding:9px 16px;background:#f7f7f5;border-top:1px solid #e1e0d9;
+  font-size:11px;color:#52514e;line-height:1.55}
+.rodape b{color:#0b0b0b}
+.legenda{text-align:center;font-family:Arial,Helvetica,sans-serif;
+  font-size:13px;color:#0b0b0b;margin-top:14px}
+.fonte{text-align:center;font-family:Arial,Helvetica,sans-serif;
+  font-size:11px;color:#52514e;margin-top:3px;font-style:italic}
+"""
+
+
+def html_entidade(num, nome, descricao, dados, cor):
+    linhas = []
+    for c in dados["colunas"]:
+        tag = ""
+        if c["chave"] in CHAVE:
+            rot, tc = CHAVE[c["chave"]]
+            # MUL só é chave estrangeira de fato se houver FK declarada
+            if c["chave"] == "MUL" and c["nome"] not in dados["fks"]:
+                rot, tc = "IDX", "#898781"
+            tag = f'<span class="tag" style="background:{tc}">{rot}</span>'
+        linhas.append(
+            f'<tr><td class="attr">{c["nome"]}</td>'
+            f'<td class="tipo">{c["tipo"]}</td>'
+            f'<td class="nulo">{"obrigatório" if c["nulo"] == "NOT NULL" else "opcional"}</td>'
+            f'<td>{tag}</td></tr>')
+    if dados["fks"]:
+        fk = " · ".join(f"<b>{k}</b> → {v}" for k, v in sorted(dados["fks"].items()))
+        rodape = f'<div class="rodape">Chaves estrangeiras: {fk}</div>'
+    else:
+        rodape = '<div class="rodape">Chaves estrangeiras: nenhuma</div>'
+    return f"""<!doctype html><html><head><meta charset="utf-8">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;600&display=swap">
+<style>{CSS % {"cor": cor}}</style></head><body><div id="alvo">
+<div class="cartao">
+  <div class="topo"><div class="nome">{nome}</div>
+    <div class="sub">{descricao}</div></div>
+  <table>
+    <tr><th>Atributo</th><th>Tipo de dado</th><th>Obrigatoriedade</th><th>Chave</th></tr>
+    {"".join(linhas)}
+  </table>
+  {rodape}
+</div>
+<div class="legenda">Figura {num} – Entidade {nome}</div>
+<div class="fonte">Fonte: Autoria própria, (2026)</div>
+</div></body></html>"""
+
+
+CORES = {"REGIAO": "#2a78d6", "TIPO_SOLO": "#2a78d6", "CULTURA": "#2a78d6",
+         "CONFIGURACAO_SAFRA": "#1baf7a", "SENSOR_IOT": "#1baf7a",
+         "LEITURA_IOT": "#1baf7a"}
+
+if __name__ == "__main__":
+    texto = open(INVENTARIO, encoding="utf-8", errors="replace").read()
+    tab = parse(texto)
+    faltando = [n for _, n, _ in FIGURAS if n not in tab]
+    if faltando:
+        sys.exit(f"ABORTADO: não achei no inventário: {faltando}")
+
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as pw:
+        b = pw.chromium.launch(executable_path="/opt/pw-browsers/chromium")
+        pg = b.new_page(viewport={"width": 860, "height": 900},
+                        device_scale_factor=3)
+        for num, nome, desc in FIGURAS:
+            arq = SAIDA / f"fig{num}_{nome.lower()}.html"
+            arq.write_text(html_entidade(num, nome, desc, tab[nome],
+                                         CORES[nome]), encoding="utf-8")
+            pg.goto("file://" + str(arq.resolve()))
+            pg.wait_for_timeout(1400)
+            png = SAIDA / f"fig{num}_{nome}.png"
+            pg.query_selector("#alvo").screenshot(path=str(png))
+            subprocess.run([
+                "python3", "-c",
+                f"from PIL import Image;im=Image.open('{png}');"
+                f"im.convert('RGB').save('{SAIDA}/fig{num}_{nome}.jpg','JPEG',"
+                f"quality=94,dpi=(300,300),subsampling=0);print('{nome}',im.size)"
+            ], check=True)
+        b.close()
+
+
+==============================================================================
+ARQUIVO: exportar_sensor.py
+==============================================================================
+
+# -*- coding: utf-8 -*-
+"""Exporta as leituras do nó sensor para sensor.json, que a calculadora lê.
+
+A página publicada não alcança o MySQL — o navegador do artefato só faz HTTPS
+para domínios liberados, e o banco fala protocolo binário na porta 3306. Então
+o caminho é este: você roda isto na sua máquina, que enxerga o banco, e o JSON
+gerado acompanha a página.
+
+    python exportar_sensor.py              # grava sensor.json
+    python exportar_sensor.py --limite 500 # só as N leituras mais recentes
+
+Para manter atualizado, agende no Agendador de Tarefas do Windows.
+"""
+import argparse
+import json
+import sys
+from datetime import datetime
+
+import pandas as pd
+
+from banco import conectar
+
+AMOSTRAS_SERIE = 240   # pontos no gráfico; o resto vira resumo
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--limite", type=int, default=5000,
+                    help="leituras mais recentes a considerar (padrão 5000)")
+    ap.add_argument("--saida", default="sensor.json")
+    args = ap.parse_args()
+
+    con = conectar()
+    # Traz a leitura junto do contexto: qual sensor, qual safra, qual região.
+    sql = """
+        SELECT l.id_leitura, l.temperatura, l.umidade_relativa, l.data_hora,
+               s.modelo, s.fabricante, s.protocolo_comunicacao,
+               s.frequencia_amostragem_min, s.status_operacional,
+               r.uf, r.cidade, r.cod_estacao,
+               c.data_plantio, cu.nome_cultura, t.nome_solo
+          FROM LEITURA_IOT l
+          JOIN SENSOR_IOT s          ON s.id_sensor  = l.id_sensor
+          JOIN CONFIGURACAO_SAFRA c  ON c.id_config  = l.id_config
+          LEFT JOIN REGIAO r         ON r.id_regiao  = c.id_regiao
+          LEFT JOIN CULTURA cu       ON cu.id_cultura = c.id_cultura
+          LEFT JOIN TIPO_SOLO t      ON t.id_solo    = c.id_solo
+         ORDER BY l.data_hora DESC
+         LIMIT %s"""
+    df = pd.read_sql(sql, con, params=(args.limite,))
+    con.close()
+
+    if df.empty:
+        sys.exit("ABORTADO: LEITURA_IOT não devolveu nenhuma linha.")
+
+    df = df.sort_values("data_hora")
+    df["temperatura"] = pd.to_numeric(df.temperatura, errors="coerce")
+    df["umidade_relativa"] = pd.to_numeric(df.umidade_relativa, errors="coerce")
+
+    ult = df.iloc[-1]
+    inicio, fim = df.data_hora.iloc[0], df.data_hora.iloc[-1]
+    duracao_s = (fim - inicio).total_seconds()
+
+    # Intervalo REAL entre leituras, medido — não o que a coluna
+    # frequencia_amostragem_min declara. As duas podem divergir, e a página
+    # mostra as duas justamente para que a divergência apareça.
+    intervalos = df.data_hora.diff().dt.total_seconds().dropna()
+    intervalo_medido = float(intervalos.median()) if len(intervalos) else None
+
+    # Reamostra a série para caber na página sem perder a forma.
+    passo = max(1, len(df) // AMOSTRAS_SERIE)
+    s = df.iloc[::passo]
+
+    out = {
+        "gerado_em": datetime.now().isoformat(timespec="seconds"),
+        "sensor": {
+            "modelo": ult.modelo,
+            "fabricante": ult.fabricante,
+            "protocolo": ult.protocolo_comunicacao,
+            "frequencia_declarada_min": (None if pd.isna(ult.frequencia_amostragem_min)
+                                         else int(ult.frequencia_amostragem_min)),
+            "intervalo_medido_s": (None if intervalo_medido is None
+                                   else round(intervalo_medido, 1)),
+            "status": ult.status_operacional,
+        },
+        "local": {
+            "uf": ult.uf, "cidade": ult.cidade, "cod_estacao": ult.cod_estacao,
+            "cultura": ult.nome_cultura, "solo": ult.nome_solo,
+            "data_plantio": (None if pd.isna(ult.data_plantio)
+                             else str(ult.data_plantio)),
+        },
+        "janela": {
+            "inicio": inicio.isoformat(timespec="seconds"),
+            "fim": fim.isoformat(timespec="seconds"),
+            "leituras": int(len(df)),
+            "duracao_horas": round(duracao_s / 3600, 2),
+        },
+        "ultima": {
+            "temperatura": (None if pd.isna(ult.temperatura) else float(ult.temperatura)),
+            "umidade": (None if pd.isna(ult.umidade_relativa) else float(ult.umidade_relativa)),
+            "quando": ult.data_hora.isoformat(timespec="seconds"),
+        },
+        "resumo": {
+            "temp_media": round(float(df.temperatura.mean()), 2),
+            "temp_min": round(float(df.temperatura.min()), 2),
+            "temp_max": round(float(df.temperatura.max()), 2),
+            "umid_media": round(float(df.umidade_relativa.mean()), 2),
+            "umid_min": round(float(df.umidade_relativa.min()), 2),
+            "umid_max": round(float(df.umidade_relativa.max()), 2),
+        },
+        "serie": [
+            {"t": r.data_hora.isoformat(timespec="seconds"),
+             "temp": (None if pd.isna(r.temperatura) else round(float(r.temperatura), 2)),
+             "umid": (None if pd.isna(r.umidade_relativa) else round(float(r.umidade_relativa), 2))}
+            for r in s.itertuples()
+        ],
+    }
+
+    with open(args.saida, "w", encoding="utf-8") as f:
+        json.dump(out, f, ensure_ascii=False, indent=1)
+
+    print(f"{args.saida} gerado.")
+    print(f"  leituras            : {out['janela']['leituras']:,}")
+    print(f"  janela              : {inicio} a {fim} ({out['janela']['duracao_horas']} h)")
+    print(f"  pontos no grafico   : {len(out['serie'])}")
+    print(f"  temperatura         : {out['resumo']['temp_min']} a {out['resumo']['temp_max']} C")
+    print(f"  umidade             : {out['resumo']['umid_min']} a {out['resumo']['umid_max']} %")
+    fd = out["sensor"]["frequencia_declarada_min"]
+    im = out["sensor"]["intervalo_medido_s"]
+    if fd is not None and im is not None:
+        print(f"  intervalo declarado : {fd} (coluna frequencia_amostragem_min)")
+        print(f"  intervalo medido    : {im} s")
+        if abs(fd * 60 - im) > max(5.0, 0.2 * fd * 60):
+            print("  ATENCAO: o intervalo medido nao bate com o declarado na coluna.")
+
+
+if __name__ == "__main__":
+    main()

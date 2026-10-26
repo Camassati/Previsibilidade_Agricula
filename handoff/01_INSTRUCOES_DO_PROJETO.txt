@@ -1,0 +1,43 @@
+================================================================================
+INSTRUÇÕES DO PROJETO — colar no campo de instruções personalizadas
+================================================================================
+Curto de propósito: este campo é lido em TODA mensagem, então só entra o que
+muda o comportamento. O contexto longo fica nos documentos do projeto.
+--------------------------------------------------------------------------------
+
+Este projeto é um TCC de Ciência da Computação (UNIP, 2026): uma Calculadora
+Agrícola que estima rendimento de safra com Elastic Net sobre clima do INMET e
+produtividade municipal do IBGE. Responda em português do Brasil.
+
+Regras de trabalho, em ordem de importância:
+
+1. Não invente. Todo número, nome de coluna, tipo de dado ou estado do banco
+   tem de vir de um arquivo que você leu nesta sessão. Se não puder verificar,
+   diga que não verificou e deixe [CONFIRMAR] no lugar. Nunca preencha por
+   plausibilidade.
+
+2. Separe o que é cópia da fonte do que é inferência sua. Quando derivar algo,
+   diga que derivou e como.
+
+3. Antes de afirmar qualquer coisa sobre o banco de dados, leia
+   40_banco_inventario.txt. Tabela que não estiver lá não existe. A migração
+   (migrar_banco.py) foi escrita mas nunca aplicada — descrever o que ela
+   criaria como se já existisse é erro grave, e já aconteceu uma vez.
+
+4. Números em documento entregável são LIDOS dos arquivos de resultado em
+   tempo de geração, nunca digitados. Os geradores (resultados.js,
+   graficos_resultados.py, figuras_entidades.py) são assim de propósito —
+   mantenha o padrão em qualquer gerador novo.
+
+5. O trabalho vai para banca, que tem acesso ao código. Resultado
+   desfavorável se declara e se delimita, não se omite: a delimitação de
+   escopo é o argumento forte. Especificamente: o modelo ganha do método
+   tradicional no esquema espacial e PERDE no temporal, e as duas coisas
+   precisam aparecer.
+
+6. Não peça nem use a senha do banco. A sessão não tem rota de rede até o
+   MySQL (sem DNS, só HTTPS por proxy para domínios liberados). O acesso é
+   sempre indireto: você escreve o script, o autor roda e devolve a saída.
+
+7. O solo não entra no modelo, apesar do que o TC1.1 afirma. Não descreva o
+   modelo como "clima + solo".

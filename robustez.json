@@ -1,0 +1,57 @@
+{
+ "n_linhas": 920,
+ "n_municipios": 145,
+ "ufs": [
+  "MT",
+  "PR",
+  "RS",
+  "SP"
+ ],
+ "safra_min": 2020,
+ "safra_max": 2024,
+ "baseline": [
+  {
+   "metodo": "média histórica do município",
+   "rmse": 21.505
+  },
+  {
+   "metodo": "média histórica INDEXADA pelo ano",
+   "rmse": 20.06
+  },
+  {
+   "metodo": "Elastic Net M3 (espacial)",
+   "rmse": 19.456
+  },
+  {
+   "metodo": "Random Forest M3 (espacial)",
+   "rmse": 19.085
+  }
+ ],
+ "quebra": [
+  {
+   "metodo": "média histórica",
+   "previsto": 51.984,
+   "rmse": 24.312
+  },
+  {
+   "metodo": "média INDEXADA pelo ano",
+   "previsto": 31.616,
+   "rmse": 12.304
+  },
+  {
+   "metodo": "Elastic Net — espacial",
+   "previsto": 37.618,
+   "rmse": 13.551
+  },
+  {
+   "metodo": "Elastic Net — temporal",
+   "previsto": 69.313,
+   "rmse": 41.776
+  }
+ ],
+ "quebra_n": 30,
+ "realizado": 31.6,
+ "inferencia_ms": 0.3546,
+ "alpha": 0.01,
+ "l1_ratio": 0.95
+}

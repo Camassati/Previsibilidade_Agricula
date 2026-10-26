@@ -1,0 +1,1081 @@
+# ==========================================================================
+# NOTEBOOK: alvo_produtividade_5.ipynb
+# células: 32
+# ==========================================================================
+
+
+# ---- célula 0 (markdown) ----------------------------------------
+# # Variável-alvo: produtividade observada
+# 
+# Coleta o **dado observado** de produtividade e o cruza com a base climática semanal.
+# 
+# ---
+# 
+# ## Antes de tudo: não existe produtividade semanal
+# 
+# Esta é a questão que a banca vai levantar, então convém ter a resposta pronta.
+# 
+# **Produtividade não é uma medição periódica — é um resultado que acontece uma vez por ciclo.**
+# A lavoura produz grão uma vez e é colhida uma vez. Não existe "produtividade da semana 12"
+# em lugar nenhum do mundo, nem no IBGE, nem na CONAB, nem no USDA. Não é lacuna da estatística
+# brasileira; é a natureza do fenômeno.
+# 
+# Isso **não** invalida a base semanal. Pelo contrário: é exatamente o desenho correto.
+# 
+# | | Granularidade | Papel no modelo |
+# |---|---|---|
+# | Clima (INMET) | **semanal** | X — muitas linhas por safra |
+# | Produtividade (PAM/IBGE) | **anual por município** | y — uma linha por safra |
+# 
+# O modelo é um painel **muitos-para-um**: as semanas do ciclo são agregadas em uma linha por
+# `(município, safra)`, que é onde o `y` observado existe. A granularidade semanal do X é
+# justamente o que permite separar *seca na floração* de *seca no vegetativo* — duas coisas com
+# efeito muito diferente sobre o rendimento, e que uma média mensal ou anual mistura.
+# 
+# Dito de outro modo: a semana não serve para prever semana. Serve para **descrever com
+# resolução** o que aconteceu dentro do ciclo que produziu aquele rendimento.
+# 
+# ---
+# 
+# ## O que existe de observado, e em que granularidade
+# 
+# | Fonte | Granularidade | Natureza | Uso aqui |
+# |---|---|---|---|
+# | **PAM / IBGE** (tabela 5457) | município × ano × cultura | **observado**, apurado | **y do modelo** |
+# | **CONAB** — Acompanhamento da Safra | UF × safra, 12 levantamentos/ano | *estimativa* que converge | validação cruzada |
+# | **DERAL/PR**, **Emater/RS**, **IMEA/MT** | **semanal**, regional | *condição e progresso* (% plantado, % colhido, lavoura boa/regular/ruim) | validação qualitativa |
+# 
+# As fontes semanais existem, mas medem **andamento e condição da lavoura**, não rendimento.
+# Servem para conferir se um ano que o modelo errou feio foi um ano de evento climático
+# conhecido — argumento forte na defesa, mas não são `y`.
+# 
+# **Para a banca, a frase é:** *o alvo é o rendimento médio observado pelo IBGE, por município e
+# safra; a granularidade semanal está no preditor, e é ela que dá resolução fenológica ao
+# modelo.*
+# 
+# ---
+# 
+# ## Rastreabilidade
+# 
+# Todo cruzamento neste notebook registra **como** foi feito. O merge de estação para município
+# usa três métodos em cascata (exato → abreviação → aproximado) e cada linha carrega o método e
+# o escore. Nenhum casamento aproximado entra sem aparecer no relatório de revisão.
+
+# ---- célula 1 (markdown) ----------------------------------------
+# ## 1. Configuração
+
+# ---- célula 2 (código) -------------------------------------------
+import re
+import json
+import time
+import unicodedata
+from difflib import get_close_matches, SequenceMatcher
+
+import numpy as np
+import pandas as pd
+
+# requests é mais confortável, mas é pacote externo. urllib vem com o Python,
+# então o notebook roda em qualquer instalação limpa. Se requests existir,
+# ele é usado; se não, cai para urllib sem alarde.
+try:
+    import requests
+
+    def baixar_json(url, timeout=60):
+        resp = requests.get(url, timeout=timeout)
+        resp.raise_for_status()
+        return resp.json()
+
+except ImportError:
+    import json as _json
+    from urllib.request import urlopen, Request
+
+    def baixar_json(url, timeout=60):
+        req = Request(url, headers={"User-Agent": "TCC-CalculadoraAgricola/1.0"})
+        with urlopen(req, timeout=timeout) as resp:
+            return _json.loads(resp.read().decode("utf-8"))
+
+# Base climática SEMANAL produzida pelo notebook de ETL
+ARQUIVO_CLIMA = "df_tcc_semana.xlsx"
+
+UFS = ["MT", "PR", "RS", "SP"]
+COD_UF = {"MT": 51, "PR": 41, "RS": 43, "SP": 35}   # códigos IBGE
+
+# Culturas do TCC. O código do produto é DESCOBERTO na API, não chutado aqui.
+CULTURAS = ["Soja (em grão)", "Milho (em grão)", "Trigo (em grão)"]
+
+ANOS = list(range(2016, 2026))   # série longa, para incluir anos de quebra
+
+# Escore mínimo para aceitar um casamento aproximado de nome de município.
+LIMIAR_FUZZY = 0.88
+
+# Fonte da PAM: "api" baixa do IBGE; "arquivo" lê um download manual do SIDRA.
+# Use "arquivo" se a rede bloquear o servicodados.ibge.gov.br (comum em rede
+# corporativa ou de faculdade).
+FONTE_PAM = "api"
+ARQUIVO_PAM_MANUAL = "pam_sidra.csv"
+
+SAIDA = "df_tcc_modelo.xlsx"           # X + y já cruzados
+SAIDA_OBSERVADOS = "dados_observados.xlsx"   # só o realizado (PAM), base separada
+
+print(f"Clima: {ARQUIVO_CLIMA}")
+print(f"UFs: {', '.join(UFS)} | culturas: {len(CULTURAS)} | anos: {ANOS}")
+
+# ---- célula 3 (markdown) ----------------------------------------
+# ## 2. Lista oficial de municípios
+# 
+# O IBGE identifica município por **código**, não por nome. O INMET só dá o nome da estação.
+# A ponte entre os dois é o passo mais frágil de todo o cruzamento, então começa aqui: baixar a
+# lista oficial, com código, para ser a autoridade de nomes.
+
+# ---- célula 4 (código) -------------------------------------------
+def baixar_municipios(ufs):
+    """Lista oficial de municípios do IBGE (código + nome) para as UFs pedidas."""
+    linhas = []
+    for uf in ufs:
+        url = f"https://servicodados.ibge.gov.br/api/v1/localidades/estados/{uf}/municipios"
+        for m in baixar_json(url):
+            linhas.append({
+                "cod_municipio": int(m["id"]),
+                "municipio_ibge": m["nome"],
+                "UF": uf,
+            })
+        print(f"  {uf}: {sum(1 for l in linhas if l['UF'] == uf)} municípios")
+        time.sleep(0.3)
+    return pd.DataFrame(linhas)
+
+
+df_municipios = baixar_municipios(UFS)
+print(f"\nTotal: {len(df_municipios)} municípios")
+df_municipios.head()
+
+# ---- célula 5 (markdown) ----------------------------------------
+# ## 3. Produtividade observada — PAM / IBGE (tabela 5457)
+# 
+# A **Produção Agrícola Municipal** é a estatística oficial de produção por município. A
+# variável `112` é o *rendimento médio da produção*, em kg/ha — exatamente o `y` do modelo.
+# 
+# Os códigos de produto **não são fixados no código**: são descobertos nos metadados da API.
+# Chutar um código e receber uma série vazia é o tipo de erro que passa despercebido.
+# 
+# > **Defasagem.** A PAM de um ano sai por volta de setembro do ano seguinte. Se o ano mais
+# > recente voltar vazio, é isso — não é erro do código.
+
+# ---- célula 6 (código) -------------------------------------------
+API_AGREGADOS = "https://servicodados.ibge.gov.br/api/v3/agregados"
+API_SIDRA = "https://apisidra.ibge.gov.br/values"
+
+
+def descobrir_codigos_produto(culturas, tabela=5457, classificacao=782):
+    """Lê os metadados da tabela e devolve {nome_da_cultura: codigo}.
+
+    Descobrir em vez de fixar evita o erro silencioso de um código
+    desatualizado devolver série vazia.
+    """
+    meta = baixar_json(f"{API_AGREGADOS}/{tabela}/metadados")
+
+    categorias = {}
+    for cl in meta.get("classificacoes", []):
+        if int(cl["id"]) == classificacao:
+            for cat in cl["categorias"]:
+                categorias[cat["nome"].strip()] = int(cat["id"])
+
+    if not categorias:
+        raise RuntimeError(f"Classificação {classificacao} não encontrada na tabela {tabela}.")
+
+    encontrados, ausentes = {}, []
+    for cultura in culturas:
+        if cultura in categorias:
+            encontrados[cultura] = categorias[cultura]
+        else:
+            # tolera pequenas variações de grafia entre versões da tabela
+            perto = get_close_matches(cultura, categorias.keys(), n=1, cutoff=0.85)
+            if perto:
+                encontrados[cultura] = categorias[perto[0]]
+                print(f"  ! '{cultura}' casou com '{perto[0]}'")
+            else:
+                ausentes.append(cultura)
+
+    if ausentes:
+        raise RuntimeError(
+            f"Culturas não encontradas: {ausentes}\n"
+            f"Disponíveis (amostra): {sorted(categorias)[:25]}")
+
+    for nome, cod in encontrados.items():
+        print(f"  {nome}: código {cod}")
+    return encontrados
+
+
+CODIGOS_PRODUTO = descobrir_codigos_produto(CULTURAS)
+
+# ---- célula 7 (código) -------------------------------------------
+def baixar_pam(cod_uf, cod_produto, anos, variavel=112, tabela=5457):
+    """Rendimento médio (kg/ha) por município, para uma UF, produto e anos.
+
+    n6/in n3 <uf> = todos os municípios dentro daquele estado.
+    """
+    periodo = ",".join(str(a) for a in anos)
+    url = (f"{API_SIDRA}/t/{tabela}"
+           f"/n6/in%20n3%20{cod_uf}"
+           f"/v/{variavel}"
+           f"/p/{periodo}"
+           f"/c782/{cod_produto}"
+           f"?formato=json")
+
+    dados = baixar_json(url, timeout=180)
+
+    if len(dados) <= 1:
+        return pd.DataFrame()
+
+    # A PRIMEIRA linha do retorno do SIDRA não é dado: é o dicionário de
+    # rótulos, {"D1C": "Município (Código)", "D3C": "Ano (Código)", ...}.
+    #
+    # A ordem das dimensões MUDA conforme a consulta. Numa consulta com
+    # variável e classificação, D2 é a VARIÁVEL e D3 é o ano — assumir que
+    # D2 é o período preenche a coluna de ano com "112" (o código da
+    # variável) e o cruzamento devolve zero linhas sem nenhum erro.
+    # Por isso as colunas são localizadas pelo rótulo, não pela posição.
+    rotulos = dados[0]
+    df = pd.DataFrame(dados[1:])
+
+    def _limpar(texto):
+        # normalização local: esta função roda ANTES da célula que define
+        # normalizar_municipio, então não pode depender dela.
+        t = unicodedata.normalize("NFKD", str(texto))
+        return "".join(ch for ch in t if not unicodedata.combining(ch)).upper()
+
+    def coluna_por_rotulo(*fragmentos, exigir_codigo=None):
+        for chave, rotulo in rotulos.items():
+            texto = _limpar(rotulo)
+            if not any(f in texto for f in fragmentos):
+                continue
+            if exigir_codigo is True and not chave.endswith("C"):
+                continue
+            if exigir_codigo is False and not chave.endswith("N"):
+                continue
+            if chave in df.columns:
+                return chave
+        return None
+
+    col_mun_cod = coluna_por_rotulo("MUNICIPIO", exigir_codigo=True)
+    col_mun_nom = coluna_por_rotulo("MUNICIPIO", exigir_codigo=False)
+    col_ano     = coluna_por_rotulo("ANO", exigir_codigo=True)
+    col_prod    = coluna_por_rotulo("PRODUTO", "LAVOURA", exigir_codigo=False)
+
+    faltando = [n for n, c in [("município (código)", col_mun_cod),
+                               ("ano", col_ano)] if c is None]
+    if faltando:
+        raise RuntimeError(
+            f"Não identifiquei as colunas {faltando} na resposta do SIDRA.\n"
+            f"Rótulos recebidos: {rotulos}")
+
+    df = pd.DataFrame({
+        "cod_municipio": df[col_mun_cod],
+        "municipio_ibge": df[col_mun_nom] if col_mun_nom else "",
+        "ano_pam": df[col_ano],
+        "cultura": df[col_prod] if col_prod else "",
+        "rendimento_kg_ha": df["V"],
+    })
+
+    df["cod_municipio"] = pd.to_numeric(df["cod_municipio"], errors="coerce")
+    df["ano_pam"] = pd.to_numeric(df["ano_pam"], errors="coerce")
+    df = df.dropna(subset=["cod_municipio", "ano_pam"])
+    df["cod_municipio"] = df["cod_municipio"].astype(int)
+    df["ano_pam"] = df["ano_pam"].astype(int)
+
+    # O SIDRA escreve "Sorriso - MT" no nome; a UF vem do laço que chamou.
+    df["municipio_ibge"] = (df["municipio_ibge"].astype(str)
+                            .str.split(" - ").str[0].str.strip())
+
+    # Notação do SIDRA: "-" = zero, ".." = não se aplica, "..." = sem dado,
+    # "X" = omitido. Para RENDIMENTO, o "-" vira nulo e não zero: rendimento
+    # zero não significa "colheu nada", significa que a cultura não foi
+    # cultivada ali. Deixar como zero criaria safras falsas no treino.
+    df["rendimento_kg_ha"] = pd.to_numeric(
+        df["rendimento_kg_ha"].replace(
+            {"-": np.nan, "..": np.nan, "...": np.nan, "X": np.nan}),
+        errors="coerce")
+
+    df = df.dropna(subset=["rendimento_kg_ha"])
+
+    fora = df[(df["ano_pam"] < 1970) | (df["ano_pam"] > 2100)]
+    if len(fora):
+        raise RuntimeError(
+            f"Coluna de ano com valores implausíveis: {sorted(fora['ano_pam'].unique())[:5]}. "
+            f"A coluna identificada foi '{col_ano}'. Rótulos: {rotulos}")
+
+    return df
+
+
+blocos = []
+for uf, cod_uf in COD_UF.items():
+    for cultura, cod_prod in CODIGOS_PRODUTO.items():
+        try:
+            parte = baixar_pam(cod_uf, cod_prod, ANOS)
+            if parte.empty:
+                print(f"  {uf} / {cultura}: sem dados")
+                continue
+            parte["UF"] = uf
+            parte["cultura_tcc"] = cultura
+            blocos.append(parte)
+            print(f"  {uf} / {cultura}: {len(parte)} registros "
+                  f"({parte['ano_pam'].min()}-{parte['ano_pam'].max()})")
+        except Exception as erro:
+            print(f"  ✗ {uf} / {cultura}: {str(erro)[:90]}")
+        time.sleep(0.6)   # cortesia com a API
+
+df_pam = pd.concat(blocos, ignore_index=True)
+
+print(f"\nPAM: {len(df_pam)} registros | "
+      f"{df_pam['cod_municipio'].nunique()} municípios | anos {sorted(df_pam['ano_pam'].unique())}")
+df_pam.head()
+
+# ---- célula 8 (markdown) ----------------------------------------
+# ### Alternativa: download manual do SIDRA
+# 
+# Se a rede bloquear a API do IBGE, dá para baixar a tabela pelo site e apontar o notebook para
+# o arquivo. Ponha `FONTE_PAM = "arquivo"` na primeira célula.
+# 
+# **No SIDRA** (`sidra.ibge.gov.br/tabela/5457`), selecione:
+# 
+# | Campo | Escolha |
+# |---|---|
+# | Variável | Rendimento médio da produção |
+# | Ano | 2016 a 2025 |
+# | Unidade Territorial | Município — e marque os 4 estados |
+# | Produto | Soja (em grão), Milho (em grão), Trigo (em grão) |
+# 
+# Baixe em CSV (formato BR) e salve como `pam_sidra.csv` na pasta do notebook.
+# 
+# O leitor abaixo é tolerante: identifica as colunas pelo nome aproximado, porque o SIDRA muda o
+# cabeçalho conforme as opções marcadas no download.
+
+# ---- célula 9 (código) -------------------------------------------
+import pathlib
+
+
+def ler_pam_manual(caminho):
+    """Lê um download do SIDRA identificando as colunas pelo nome aproximado.
+
+    O layout muda conforme o que foi marcado no site, então nada é fixado por
+    posição — e o que não for reconhecido é reportado, não adivinhado.
+    """
+    if caminho.lower().endswith((".xlsx", ".xls")):
+        bruto = pd.read_excel(caminho, header=None, dtype=str)
+    else:
+        # O SIDRA envolve a tabela em título e notas de rodapé, que têm número
+        # de colunas diferente do corpo. Um read_csv comum quebra nisso, então
+        # a leitura é feita linha a linha e as larguras são igualadas.
+        texto = pathlib.Path(caminho).read_text(encoding="latin1", errors="ignore")
+        linhas_txt = [l for l in texto.splitlines() if l.strip()]
+
+        separador = max((";", ",", "\t"),
+                        key=lambda sep: max((l.count(sep) for l in linhas_txt),
+                                            default=0))
+
+        celulas = [[c.strip().strip('"') for c in l.split(separador)]
+                   for l in linhas_txt]
+        largura = max(len(linha) for linha in celulas)
+        celulas = [linha + [""] * (largura - len(linha)) for linha in celulas]
+        bruto = pd.DataFrame(celulas, dtype=str)
+
+    # O SIDRA põe título e notas em volta da tabela. A linha de cabeçalho é a
+    # primeira que menciona município.
+    linha_cab = None
+    for i in range(min(15, len(bruto))):
+        linha = " ".join(str(v) for v in bruto.iloc[i].tolist())
+        if "unicíp" in linha or "unicip" in linha:
+            linha_cab = i
+            break
+    if linha_cab is None:
+        raise RuntimeError(
+            "Não achei a linha de cabeçalho. Confira se o arquivo é o download "
+            "da tabela 5457 com nível Município.")
+
+    df = bruto.iloc[linha_cab + 1:].copy()
+    df.columns = [str(v).strip() for v in bruto.iloc[linha_cab]]
+    df = df.dropna(how="all")
+
+    def achar(*fragmentos):
+        for col in df.columns:
+            n = normalizar_municipio(col, expandir=False)
+            if any(f in n for f in fragmentos):
+                return col
+        return None
+
+    col_mun  = achar("MUNICIPIO")
+    col_ano  = achar("ANO")
+    col_prod = achar("PRODUTO", "LAVOURA")
+    col_val  = achar("VALOR", "RENDIMENTO")
+
+    faltando = [nome for nome, col in
+                [("município", col_mun), ("ano", col_ano),
+                 ("produto", col_prod), ("valor", col_val)] if col is None]
+    if faltando:
+        raise RuntimeError(
+            f"Colunas não identificadas: {faltando}\n"
+            f"Cabeçalho lido: {list(df.columns)}")
+
+    saida = pd.DataFrame({
+        "municipio_bruto": df[col_mun].astype(str).str.strip(),
+        "ano_pam": pd.to_numeric(df[col_ano], errors="coerce"),
+        "cultura_tcc": df[col_prod].astype(str).str.strip(),
+        "rendimento_kg_ha": pd.to_numeric(
+            df[col_val].astype(str).str.replace(".", "", regex=False)
+                       .str.replace(",", ".", regex=False)
+                       .replace({"-": None, "..": None, "...": None, "X": None}),
+            errors="coerce"),
+    }).dropna(subset=["ano_pam", "rendimento_kg_ha"])
+
+    saida["ano_pam"] = saida["ano_pam"].astype(int)
+
+    # O SIDRA escreve "Sorriso (MT)" — separa nome e UF.
+    extraido = saida["municipio_bruto"].str.extract(r"^(.*?)\s*\(([A-Z]{2})\)\s*$")
+    saida["municipio_ibge"] = extraido[0].fillna(saida["municipio_bruto"])
+    saida["UF"] = extraido[1]
+
+    print(f"Lidos {len(saida)} registros de {caminho}")
+    print(f"  colunas usadas: {col_mun} | {col_ano} | {col_prod} | {col_val}")
+    if saida["UF"].isna().any():
+        print(f"  ⚠️  {int(saida['UF'].isna().sum())} linhas sem UF no nome do município")
+    return saida
+
+
+if FONTE_PAM == "arquivo":
+    df_pam = ler_pam_manual(ARQUIVO_PAM_MANUAL)
+
+    # o download manual não traz o código do município: recupera pela lista oficial
+    chave = df_municipios.copy()
+    chave["chave"] = chave["municipio_ibge"].map(
+        lambda x: normalizar_municipio(x, expandir=False))
+    df_pam["chave"] = df_pam["municipio_ibge"].map(
+        lambda x: normalizar_municipio(x, expandir=False))
+
+    df_pam = df_pam.merge(chave[["chave", "UF", "cod_municipio"]],
+                          on=["chave", "UF"], how="left")
+    sem_codigo = int(df_pam["cod_municipio"].isna().sum())
+    if sem_codigo:
+        print(f"  ⚠️  {sem_codigo} linhas sem código de município — serão descartadas")
+        print(df_pam[df_pam["cod_municipio"].isna()]["municipio_ibge"].unique()[:10])
+    df_pam = df_pam.dropna(subset=["cod_municipio"])
+    df_pam["cod_municipio"] = df_pam["cod_municipio"].astype(int)
+    df_pam = df_pam.drop(columns=["chave", "municipio_bruto"])
+
+    print(f"\nPAM (manual): {len(df_pam)} registros | "
+          f"{df_pam['cod_municipio'].nunique()} municípios")
+else:
+    print("FONTE_PAM = 'api' — usando os dados já baixados na célula anterior.")
+
+# ---- célula 10 (markdown) ----------------------------------------
+# ## 3b. Excel dos dados observados
+# 
+# O realizado sai aqui, em arquivo próprio, **antes** de qualquer cruzamento. Duas razões: é a
+# base que a banca vai querer conferir contra o site do IBGE, e se algo quebrar mais adiante no
+# notebook o dado observado já está salvo.
+# 
+# Nome do arquivo: `SAIDA_OBSERVADOS`, definido na primeira célula.
+
+# ---- célula 11 (código) -------------------------------------------
+from datetime import datetime
+
+# --- monta a base de observados, limpa e com as duas unidades ---
+observados = df_pam.copy()
+observados["rendimento_sacas_ha"] = (observados["rendimento_kg_ha"] / 60).round(2)
+observados["safra"] = observados["ano_pam"]
+
+observados = observados[[
+    "cod_municipio", "municipio_ibge", "UF",
+    "cultura_tcc", "safra",
+    "rendimento_kg_ha", "rendimento_sacas_ha",
+]].sort_values(["UF", "municipio_ibge", "cultura_tcc", "safra"])
+
+# --- resumo por UF, cultura e safra: é o que se confere contra a CONAB ---
+resumo_observados = (observados
+                     .groupby(["UF", "cultura_tcc", "safra"], as_index=False)
+                     .agg(municipios=("cod_municipio", "nunique"),
+                          media_sacas_ha=("rendimento_sacas_ha", "mean"),
+                          min_sacas_ha=("rendimento_sacas_ha", "min"),
+                          max_sacas_ha=("rendimento_sacas_ha", "max")))
+for col in ["media_sacas_ha", "min_sacas_ha", "max_sacas_ha"]:
+    resumo_observados[col] = resumo_observados[col].round(1)
+
+# --- procedência, para a banca ---
+ficha = pd.DataFrame([
+    {"campo": "Fonte", "valor": "IBGE — Produção Agrícola Municipal (PAM)"},
+    {"campo": "Tabela SIDRA", "valor": "5457"},
+    {"campo": "Variável", "valor": "112 — Rendimento médio da produção (kg/ha)"},
+    {"campo": "Nível territorial", "valor": "Município (n6)"},
+    {"campo": "Natureza", "valor": "Dado observado (apurado)"},
+    {"campo": "Safras", "valor": f"{observados['safra'].min()}–{observados['safra'].max()}"},
+    {"campo": "Culturas", "valor": ", ".join(sorted(observados['cultura_tcc'].unique()))},
+    {"campo": "UFs", "valor": ", ".join(sorted(observados['UF'].unique()))},
+    {"campo": "Municípios", "valor": str(observados['cod_municipio'].nunique())},
+    {"campo": "Registros", "valor": str(len(observados))},
+    {"campo": "Conversão", "valor": "1 saca = 60 kg"},
+    {"campo": "Baixado em", "valor": datetime.now().strftime("%d/%m/%Y %H:%M")},
+])
+
+with pd.ExcelWriter(SAIDA_OBSERVADOS, engine="openpyxl") as writer:
+    observados.to_excel(writer, sheet_name="observados", index=False)
+    resumo_observados.to_excel(writer, sheet_name="resumo_uf_safra", index=False)
+    ficha.to_excel(writer, sheet_name="procedencia", index=False)
+
+print(f"Salvo: {SAIDA_OBSERVADOS}")
+print(f"  {len(observados)} registros | {observados['cod_municipio'].nunique()} municípios")
+print(f"  safras {observados['safra'].min()}-{observados['safra'].max()}")
+print("\nAbas: observados | resumo_uf_safra | procedencia")
+print("\nAmostra:")
+print(observados.head(8).to_string(index=False))
+
+# ---- célula 12 (markdown) ----------------------------------------
+# ## 4. Ponte estação → município
+# 
+# O ponto mais frágil do cruzamento. O INMET nomeia a estação pelo **local de instalação**, não
+# pelo município: `SAO PAULO - MIRANTE`, `PORTO ALEGRE- BELEM NOVO`, `BRASNORTE (NOVO MUNDO)`,
+# `S.J. DO RIO CLARO`. Nenhum desses casa direto com o nome do IBGE.
+# 
+# Três métodos em cascata, e **cada linha registra qual foi usado**:
+# 
+# 1. **exato** — nomes idênticos depois de normalizar acento, caixa e pontuação
+# 2. **abreviação** — expande as abreviações típicas do INMET (`S.J.` → `SAO JOSE`, `MAL.` →
+#    `MARECHAL`)
+# 3. **aproximado** — similaridade de texto acima de `LIMIAR_FUZZY`, e **sai listado** para
+#    conferência
+# 
+# O que não casar por nenhum dos três fica de fora e aparece no relatório. Um merge que falha
+# em silêncio é pior que um merge que falha.
+
+# ---- célula 13 (código) -------------------------------------------
+ABREVIACOES = {
+    r"\bS\.J\.": "SAO JOSE", r"\bS\. J\.": "SAO JOSE",
+    r"\bSTA\.": "SANTA",     r"\bSTO\.": "SANTO",
+    r"\bS\.": "SAO",
+    r"\bMAL\.": "MARECHAL",  r"\bGAL\.": "GENERAL",
+    r"\bPRES\.": "PRESIDENTE", r"\bCEL\.": "CORONEL",
+    r"\bGOV\.": "GOVERNADOR", r"\bENG\.": "ENGENHEIRO",
+    r"\bN\. SRA\.": "NOSSA SENHORA", r"\bD\.": "DOM",
+}
+
+
+def _tirar_acento(texto):
+    t = unicodedata.normalize("NFKD", str(texto))
+    return "".join(ch for ch in t if not unicodedata.combining(ch))
+
+
+def normalizar_municipio(nome, expandir=True):
+    """Nome livre -> forma canônica comparável."""
+    n = _tirar_acento(nome).upper().strip()
+
+    # O INMET põe o ponto de medição entre parênteses ou depois de hífen.
+    n = re.sub(r"\s*\(.*?\)", "", n)
+    # Só separa em " - " com espaço: "Não-Me-Toque" e "Embu-Guaçu" são nomes
+    # legítimos e viravam "NAO" e "EMBU", perdendo o casamento com o IBGE.
+    n = re.split(r"\s+-\s+", n)[0]
+
+    if expandir:
+        for padrao, cheio in ABREVIACOES.items():
+            n = re.sub(padrao, cheio, n)
+
+    n = re.sub(r"[^A-Z ]", " ", n)
+    return re.sub(r"\s+", " ", n).strip()
+
+
+def casar_estacoes(estacoes, municipios, limiar=LIMIAR_FUZZY):
+    """estacoes: DataFrame com UF, Cidade, Cod_Estacao (únicos).
+    Devolve o mesmo com cod_municipio, metodo e escore."""
+    municipios = municipios.copy()
+    municipios["chave"] = municipios["municipio_ibge"].map(
+        lambda x: normalizar_municipio(x, expandir=False))
+
+    resultado = []
+    for _, est in estacoes.iterrows():
+        candidatos = municipios[municipios["UF"] == est["UF"]]
+        mapa = dict(zip(candidatos["chave"], candidatos["cod_municipio"]))
+        nomes = dict(zip(candidatos["chave"], candidatos["municipio_ibge"]))
+
+        # 1) exato, sem expandir abreviação
+        chave = normalizar_municipio(est["Cidade"], expandir=False)
+        if chave in mapa:
+            resultado.append({**est, "cod_municipio": mapa[chave],
+                              "municipio_ibge": nomes[chave],
+                              "metodo": "exato", "escore": 1.0})
+            continue
+
+        # 2) expandindo abreviações
+        chave2 = normalizar_municipio(est["Cidade"], expandir=True)
+        if chave2 in mapa:
+            resultado.append({**est, "cod_municipio": mapa[chave2],
+                              "municipio_ibge": nomes[chave2],
+                              "metodo": "abreviacao", "escore": 1.0})
+            continue
+
+        # 3) aproximado — sempre reportado
+        perto = get_close_matches(chave2, list(mapa), n=1, cutoff=limiar)
+        if perto:
+            escore = SequenceMatcher(None, chave2, perto[0]).ratio()
+            resultado.append({**est, "cod_municipio": mapa[perto[0]],
+                              "municipio_ibge": nomes[perto[0]],
+                              "metodo": "aproximado", "escore": round(escore, 3)})
+        else:
+            resultado.append({**est, "cod_municipio": np.nan,
+                              "municipio_ibge": None,
+                              "metodo": "SEM CASAMENTO", "escore": 0.0})
+
+    return pd.DataFrame(resultado)
+
+
+df_clima = pd.read_excel(ARQUIVO_CLIMA, sheet_name="dados")
+estacoes = df_clima[["UF", "Cidade", "Cod_Estacao"]].drop_duplicates()
+
+df_ponte = casar_estacoes(estacoes, df_municipios)
+
+print("MÉTODO DE CASAMENTO")
+print(df_ponte["metodo"].value_counts().to_string())
+
+aprox = df_ponte[df_ponte["metodo"] == "aproximado"]
+if len(aprox):
+    print(f"\n⚠️  {len(aprox)} casamentos APROXIMADOS — conferir um a um:")
+    print(aprox[["UF", "Cidade", "municipio_ibge", "escore"]].to_string(index=False))
+
+sem = df_ponte[df_ponte["metodo"] == "SEM CASAMENTO"]
+if len(sem):
+    print(f"\n✗ {len(sem)} estações SEM município — ficam fora do modelo:")
+    print(sem[["UF", "Cidade", "Cod_Estacao"]].to_string(index=False))
+
+# ---- célula 14 (código) -------------------------------------------
+# Municípios com mais de uma estação: a média das estações representa o município.
+# (Porto Alegre tem 3, Santa Vitória do Palmar tem 3, São Paulo tem 2...)
+multi = (df_ponte[df_ponte["cod_municipio"].notna()]
+         .groupby(["UF", "municipio_ibge"]).size()
+         .rename("estacoes").reset_index())
+multi = multi[multi["estacoes"] > 1]
+
+if len(multi):
+    print("Municípios com mais de uma estação (serão promediados):")
+    print(multi.to_string(index=False))
+else:
+    print("Nenhum município com estação duplicada.")
+
+# ---- célula 15 (markdown) ----------------------------------------
+# ## 5. Janela do ciclo e estádios fenológicos
+# 
+# Aqui a granularidade semanal passa a valer. Em vez de somar o ano civil, o clima é agregado
+# **dentro do ciclo da cultura**, separado por estádio — porque seca na floração custa muito
+# mais que seca no vegetativo, e é isso que o coeficiente do Elastic Net vai poder mostrar.
+# 
+# O **ano-safra** também não é o ano civil. Soja semeada em novembro de 2023 é colhida em
+# fevereiro de 2024 e entra na PAM como safra **2024**. A tabela abaixo faz essa conversão.
+# 
+# > ⚠️ **Parâmetros a validar com o agrônomo.** As semanas de início e fim abaixo são
+# > aproximações de calendário agrícola regional. São o tipo de parâmetro que o TCC já atribui
+# > ao agrônomo como stakeholder — ajuste antes da defesa e cite a fonte usada
+# > (zoneamento agrícola de risco climático do MAPA, por exemplo).
+
+# ---- célula 16 (código) -------------------------------------------
+# semana_inicio / semana_fim = semanas ISO. offset_ano_pam: em que ano a safra
+# é contabilizada em relação ao ano da semeadura (0 = mesmo ano, 1 = ano seguinte).
+JANELAS_CICLO = pd.DataFrame([
+    # cultura,          UF,   sem_ini, sem_fim, offset, fonte
+    ("Soja (em grão)",  "MT",  40, 8,  1, "semeadura out, colheita fev"),
+    ("Soja (em grão)",  "PR",  40, 13, 1, "semeadura out, colheita mar/abr"),
+    ("Soja (em grão)",  "RS",  43, 15, 1, "semeadura nov, colheita abr"),
+    ("Soja (em grão)",  "SP",  40, 10, 1, "semeadura out, colheita mar"),
+
+    ("Milho (em grão)", "MT",   4, 27, 0, "2a safra: semeadura jan/fev, colheita jul"),
+    ("Milho (em grão)", "PR",   6, 30, 0, "2a safra: semeadura fev, colheita jul"),
+    ("Milho (em grão)", "RS",  35, 10, 1, "1a safra: semeadura set, colheita mar"),
+    ("Milho (em grão)", "SP",   4, 27, 0, "2a safra: semeadura jan, colheita jul"),
+
+    ("Trigo (em grão)", "PR",  14, 40, 0, "semeadura abr, colheita set/out"),
+    ("Trigo (em grão)", "RS",  22, 45, 0, "semeadura jun, colheita nov"),
+    ("Trigo (em grão)", "SP",  10, 35, 0, "semeadura mar, colheita ago/set"),
+], columns=["cultura_tcc", "UF", "semana_inicio", "semana_fim",
+            "offset_ano_pam", "observacao"])
+
+# Fração do ciclo ocupada por cada estádio. Também aproximação a validar.
+ESTADIOS = [
+    ("vegetativo",  0.00, 0.45),
+    ("floracao",    0.45, 0.70),
+    ("enchimento",  0.70, 1.00),
+]
+
+print(JANELAS_CICLO.to_string(index=False))
+
+# ---- célula 17 (código) -------------------------------------------
+from datetime import date
+
+
+def semanas_no_ano_iso(ano):
+    """52 ou 53, conforme o ano. 28/dez cai sempre na última semana ISO."""
+    return date(ano, 12, 28).isocalendar()[1]
+
+
+def semanas_do_ciclo(semana_ini, semana_fim, ano_semeadura):
+    """Lista de chaves AAAASS do ciclo, tratando a virada do ano.
+
+    Se semana_fim < semana_inicio, o ciclo atravessa o ano (ex.: 40 -> 8).
+    O ano de virada usa o número real de semanas ISO daquele ano: incluir
+    uma semana 53 inexistente infla `semanas_esperadas` e derruba a
+    cobertura do ciclo sem motivo.
+    """
+    chaves = []
+    if semana_fim >= semana_ini:
+        for s in range(semana_ini, semana_fim + 1):
+            chaves.append(ano_semeadura * 100 + s)
+    else:
+        for s in range(semana_ini, semanas_no_ano_iso(ano_semeadura) + 1):
+            chaves.append(ano_semeadura * 100 + s)
+        for s in range(1, semana_fim + 1):
+            chaves.append((ano_semeadura + 1) * 100 + s)
+    return chaves
+
+
+def rotular_estadio(posicao):
+    """posicao em [0,1] dentro do ciclo -> nome do estádio."""
+    for nome, ini, fim in ESTADIOS:
+        if ini <= posicao < fim:
+            return nome
+    return ESTADIOS[-1][0]
+
+
+# Como cada variável deve ser agregada ao somar semanas do ciclo.
+AGREGACAO_CICLO = {
+    "precipitacao_total_mm": "sum",
+    "graus_dia_acum":        "sum",
+    "radiacao_total_mjm2":   "sum",
+    "dias_com_chuva":        "sum",
+    "maior_veranico":        "max",
+    "dias_secos_acumulados": "max",
+    "temp_media":            "mean",
+    "temp_max_abs":          "max",
+    "temp_min_abs":          "min",
+    "amplitude_termica":     "mean",
+    "umidade_media":         "mean",
+    "umidade_min_abs":       "min",
+    "vpd_medio_kpa":         "mean",
+    "vpd_max_kpa":           "max",
+    "pressao_media":         "mean",
+    "vento_medio":           "mean",
+    "vento_rajada_max":      "max",
+    "cobertura":             "mean",
+}
+
+
+
+def agregar_coluna(serie, como):
+    """Agrega sem inventar zero.
+
+    pandas devolve 0.0 para Series([nan, nan]).sum(), e "0 mm de chuva" ou
+    "0 graus-dia acumulados" é a assinatura numérica de uma seca extrema.
+    O ETL já nulifica as semanas de cobertura baixa; sem min_count=1 esse
+    cuidado é desfeito aqui e o modelo passa a aprender falha de sensor.
+    """
+    if como == "sum":
+        return serie.sum(min_count=1)
+    return serie.agg(como)
+
+
+print(f"{len(AGREGACAO_CICLO)} variáveis climáticas serão agregadas por estádio.")
+
+# ---- célula 18 (código) -------------------------------------------
+def agregar_por_ciclo(df_clima, df_ponte, janelas):
+    """Semanas -> uma linha por (município, cultura, safra), com colunas por estádio."""
+    clima = df_clima.merge(
+        df_ponte[df_ponte["cod_municipio"].notna()][
+            ["Cod_Estacao", "cod_municipio", "municipio_ibge", "metodo"]],
+        on="Cod_Estacao", how="inner")
+
+    disponiveis = {k: v for k, v in AGREGACAO_CICLO.items() if k in clima.columns}
+
+    # Municípios com várias estações: média entre elas, semana a semana.
+    clima_mun = (clima.groupby(["cod_municipio", "municipio_ibge", "UF", "periodo"], as_index=False)
+                      .agg({c: "mean" for c in disponiveis}))
+
+    linhas = []
+    for _, janela in janelas.iterrows():
+        mun_uf = clima_mun[clima_mun["UF"] == janela["UF"]]
+        if mun_uf.empty:
+            continue
+
+        anos_semeadura = sorted({p // 100 for p in mun_uf["periodo"]})
+
+        for ano_sem in anos_semeadura:
+            chaves = semanas_do_ciclo(int(janela["semana_inicio"]),
+                                      int(janela["semana_fim"]), ano_sem)
+            ano_pam = ano_sem + int(janela["offset_ano_pam"])
+
+            bloco = mun_uf[mun_uf["periodo"].isin(chaves)]
+            if bloco.empty:
+                continue
+
+            # posição de cada semana dentro do ciclo -> estádio
+            ordem = {chave: i / max(len(chaves) - 1, 1) for i, chave in enumerate(chaves)}
+            bloco = bloco.copy()
+            bloco["estadio"] = bloco["periodo"].map(lambda p: rotular_estadio(ordem[p]))
+
+            for (cod_mun, nome_mun), g in bloco.groupby(["cod_municipio", "municipio_ibge"]):
+                linha = {
+                    "cod_municipio": cod_mun,
+                    "municipio_ibge": nome_mun,
+                    "UF": janela["UF"],
+                    "cultura_tcc": janela["cultura_tcc"],
+                    "ano_pam": ano_pam,
+                    "ano_semeadura": ano_sem,
+                    "semanas_no_ciclo": int(g["periodo"].nunique()),
+                    "semanas_validas": int(g["temp_media"].notna().sum()),
+                    "semanas_esperadas": len(chaves),
+                }
+                # Cobertura sobre semanas com DADO, não sobre linhas presentes.
+                # O ETL mantém a linha da semana e nulifica as medidas quando a
+                # cobertura diária é baixa; contar linhas dava cobertura de 100%
+                # em cima de buraco de sensor e o filtro de 80% não barrava nada.
+                linha["cobertura_ciclo"] = round(
+                    int(g["temp_media"].notna().sum()) / len(chaves), 3)
+
+                # ciclo inteiro
+                for col, como in disponiveis.items():
+                    linha[f"ciclo_{col}"] = agregar_coluna(g[col], como)
+
+                # por estádio — é aqui que a granularidade semanal rende
+                for nome_est, _, _ in ESTADIOS:
+                    sub = g[g["estadio"] == nome_est]
+                    for col, como in disponiveis.items():
+                        linha[f"{nome_est}_{col}"] = (
+                            agregar_coluna(sub[col], como) if len(sub) else np.nan)
+
+                linhas.append(linha)
+
+    return pd.DataFrame(linhas)
+
+
+df_ciclo = agregar_por_ciclo(df_clima, df_ponte, JANELAS_CICLO)
+
+print(f"Agregado por ciclo: {len(df_ciclo)} linhas "
+      f"(município × cultura × safra) x {df_ciclo.shape[1]} colunas")
+print(f"Cobertura média do ciclo: {df_ciclo['cobertura_ciclo'].mean():.1%}")
+df_ciclo.head()
+
+# ---- célula 19 (markdown) ----------------------------------------
+# ## 6. Junção X ↔ y
+# 
+# Aqui o painel se fecha: as semanas viraram uma linha por safra, e essa linha recebe o
+# rendimento observado.
+
+# ---- célula 20 (código) -------------------------------------------
+def normalizar_chaves(df, nome):
+    """Iguala o tipo das três chaves antes do merge.
+
+    A causa mais comum de um cruzamento devolver zero linhas não é chave
+    ausente, é chave com tipo diferente: 5107925.0 (float, porque em algum
+    passo houve NaN na coluna) não casa com 5107925 (int).
+    """
+    d = df.copy()
+    d["cod_municipio"] = pd.to_numeric(d["cod_municipio"], errors="coerce").astype("Int64")
+    d["ano_pam"] = pd.to_numeric(d["ano_pam"], errors="coerce").astype("Int64")
+    d["cultura_tcc"] = d["cultura_tcc"].astype(str).str.strip()
+    antes = len(d)
+    d = d.dropna(subset=["cod_municipio", "ano_pam"])
+    if len(d) < antes:
+        print(f"  {nome}: {antes - len(d)} linhas sem chave, descartadas")
+    return d
+
+
+ciclo_ok = normalizar_chaves(df_ciclo, "df_ciclo")
+pam_ok = normalizar_chaves(df_pam, "df_pam")
+
+df_modelo = ciclo_ok.merge(
+    pam_ok[["cod_municipio", "ano_pam", "cultura_tcc", "rendimento_kg_ha"]],
+    on=["cod_municipio", "ano_pam", "cultura_tcc"],
+    how="inner",
+)
+
+# sacas/ha: 1 saca = 60 kg (soja, milho e trigo)
+if len(df_modelo):
+    df_modelo["rendimento_sacas_ha"] = (df_modelo["rendimento_kg_ha"] / 60).round(2)
+
+
+# ---------------- diagnóstico automático quando o merge vem vazio -----------
+def diagnosticar_merge(ciclo, pam):
+    print("=" * 62)
+    print("O CRUZAMENTO VOLTOU VAZIO — onde está o desencontro")
+    print("=" * 62)
+    print(f"df_ciclo: {len(ciclo)} linhas | df_pam: {len(pam)} linhas")
+
+    if len(ciclo) == 0:
+        print()
+        print(">>> df_ciclo vazio: o problema é a agregação por ciclo.")
+        print("    Confira se os períodos do clima são semanais (AAAASS).")
+        print(f"    Períodos vistos: {sorted(df_clima['periodo'].unique())[:6]}")
+        print("    Se forem AAAAMM (202301..202312), o ETL rodou em modo MÊS —")
+        print("    refaça com GRANULARIDADE = 'semana'.")
+        return
+    if len(pam) == 0:
+        print()
+        print(">>> df_pam vazio: a PAM não retornou dados para o recorte pedido.")
+        return
+
+    print()
+    print("Interseção de cada chave, isoladamente:")
+    culpadas = []
+    for k in ["cod_municipio", "ano_pam", "cultura_tcc"]:
+        a, b = set(ciclo[k].dropna()), set(pam[k].dropna())
+        comum = a & b
+        if not comum:
+            culpadas.append(k)
+        print(f"  {k:16s} ciclo={len(a):5d}  pam={len(b):5d}  em comum={len(comum):5d}"
+              f"{'   <-- ZERO' if not comum else ''}")
+        print(f"  {'':16s} exemplo ciclo: {sorted(a)[:3]}")
+        print(f"  {'':16s} exemplo pam  : {sorted(b)[:3]}")
+
+    print()
+    if culpadas:
+        print(f">>> Chave(s) sem nenhum valor em comum: {culpadas}")
+        if "cultura_tcc" in culpadas:
+            print("    A PAM devolve o nome exato do produto. Ajuste CULTURAS e")
+            print("    as linhas de JANELAS_CICLO para usarem a mesma grafia.")
+        if "ano_pam" in culpadas:
+            print("    Confira ANOS e o offset_ano_pam das janelas: uma safra")
+            print("    semeada em 2023 e colhida em 2024 é PAM 2024.")
+        if "cod_municipio" in culpadas:
+            print("    Nenhum município da ponte aparece na PAM — provável que a")
+            print("    PAM tenha vindo de outras UFs, ou a ponte casou errado.")
+    else:
+        print(">>> Cada chave tem valores em comum, mas nenhuma COMBINAÇÃO das três.")
+        print("    Ou seja: existe o município, existe o ano, existe a cultura —")
+        print("    só não existe essa cultura naquele município naquela safra.")
+        print("    Verifique as janelas de ciclo por UF (JANELAS_CICLO):")
+        print(ciclo.groupby(["UF", "cultura_tcc"])["ano_pam"]
+              .agg(["min", "max", "count"]).to_string())
+
+
+if len(df_modelo) == 0:
+    diagnosticar_merge(ciclo_ok, pam_ok)
+else:
+    print("=" * 62)
+    print("RESULTADO DA JUNÇÃO")
+    print("=" * 62)
+    print(f"Linhas com X e y: {len(df_modelo)}")
+    print(f"Municípios: {df_modelo['cod_municipio'].nunique()}")
+    print(f"Culturas:   {df_modelo['cultura_tcc'].nunique()}")
+    print(f"Safras:     {sorted(df_modelo['ano_pam'].unique())}")
+    print()
+    print("Por cultura e UF:")
+    print(pd.crosstab(df_modelo["cultura_tcc"], df_modelo["UF"]).to_string())
+
+    print()
+    print("-" * 62)
+    print("FUNIL DE PERDAS")
+    print("-" * 62)
+    n_est = df_clima["Cod_Estacao"].nunique()
+    n_casadas = int(df_ponte["cod_municipio"].notna().sum())
+    print(f"  estações no clima ............... {n_est}")
+    print(f"  casadas com município ........... {n_casadas}")
+    print(f"  linhas ciclo x município ........ {len(ciclo_ok)}")
+    print(f"  com rendimento na PAM ........... {len(df_modelo)}")
+    print(f"  sem rendimento (cultura não plantada / PAM sem dado): "
+          f"{len(ciclo_ok) - len(df_modelo)}")
+
+# ---- célula 21 (markdown) ----------------------------------------
+# ## 7. Verificação de veracidade
+# 
+# Três checagens que a banca pode pedir. A terceira é a mais forte: comparar a média por estado
+# com o número público da CONAB. Se batem na ordem de grandeza, o cruzamento está de pé.
+
+# ---- célula 22 (código) -------------------------------------------
+if len(df_modelo) == 0:
+    raise SystemExit(
+        "df_modelo está vazio — rode a célula anterior e leia o diagnóstico. "
+        "Sem cruzamento não há o que verificar.")
+
+print("=" * 62)
+print("VERIFICAÇÃO DA VARIÁVEL-ALVO")
+print("=" * 62)
+
+# --- 1. faixas plausíveis (produtividade brasileira típica) ---
+FAIXAS_SACAS = {
+    "Soja (em grão)":  (25, 90),
+    "Milho (em grão)": (30, 200),
+    "Trigo (em grão)": (15, 90),
+}
+print("\n[1] Rendimento dentro da faixa plausível:")
+for cultura, (lo, hi) in FAIXAS_SACAS.items():
+    s = df_modelo[df_modelo["cultura_tcc"] == cultura]["rendimento_sacas_ha"]
+    if not len(s):
+        continue
+    fora = int(((s < lo) | (s > hi)).sum())
+    print(f"    {cultura:18s} {s.mean():6.1f} sacas/ha "
+          f"(min {s.min():5.1f}, max {s.max():6.1f}) | fora de [{lo},{hi}]: {fora}")
+
+# --- 2. procedência do casamento de município ---
+print("\n[2] Procedência do casamento estação -> município:")
+proc = df_ponte["metodo"].value_counts()
+for metodo, n in proc.items():
+    print(f"    {metodo:16s} {n:4d} ({100*n/len(df_ponte):.1f}%)")
+
+# --- 3. média por UF e cultura, para conferir contra a CONAB ---
+print("\n[3] Rendimento médio por UF e cultura (sacas/ha)")
+print("    Conferir contra o boletim da CONAB da safra correspondente:")
+resumo = (df_modelo.groupby(["cultura_tcc", "UF", "ano_pam"])["rendimento_sacas_ha"]
+          .agg(["mean", "count"]).round(1).reset_index())
+resumo.columns = ["cultura", "UF", "safra", "media_sacas_ha", "n_municipios"]
+print(resumo.to_string(index=False))
+
+# --- 4. ciclos incompletos ---
+incompletos = int((df_modelo["cobertura_ciclo"] < 0.80).sum())
+pct = 100 * incompletos / len(df_modelo) if len(df_modelo) else 0.0
+print()
+print(f"[4] Ciclos com menos de 80% das semanas: {incompletos} ({pct:.1f}%)")
+print("    Recomendado filtrar estas linhas antes de treinar.")
+
+# ---- célula 23 (markdown) ----------------------------------------
+# ## 8. Exportação
+
+# ---- célula 24 (código) -------------------------------------------
+PROCEDENCIA = pd.DataFrame([
+    {"item": "Preditores (X)", "fonte": "INMET — estações automáticas",
+     "granularidade": "horária -> semanal", "natureza": "observado"},
+    {"item": "Alvo (y)", "fonte": "IBGE — PAM, tabela 5457, variável 112",
+     "granularidade": "município x ano", "natureza": "observado (apurado)"},
+    {"item": "Solo", "fonte": "classificação SiBCS (mapa a validar)",
+     "granularidade": "município", "natureza": "referência"},
+    {"item": "Janela do ciclo", "fonte": "calendário agrícola regional",
+     "granularidade": "cultura x UF", "natureza": "parâmetro a validar"},
+])
+
+with pd.ExcelWriter(SAIDA, engine="openpyxl") as writer:
+    df_modelo.to_excel(writer, sheet_name="modelo", index=False)
+    df_pam.to_excel(writer, sheet_name="pam_bruto", index=False)
+    df_ponte.to_excel(writer, sheet_name="ponte_municipio", index=False)
+    JANELAS_CICLO.to_excel(writer, sheet_name="janelas_ciclo", index=False)
+    PROCEDENCIA.to_excel(writer, sheet_name="procedencia", index=False)
+
+print(f"Salvo: {SAIDA}")
+print(f"{len(df_modelo)} linhas x {df_modelo.shape[1]} colunas")
+print("\nAbas: modelo | pam_bruto | ponte_municipio | janelas_ciclo | procedencia")
+print("\nA aba 'ponte_municipio' é a que responde à banca sobre como o")
+print("cruzamento foi feito, linha a linha.")
+
+# ---- célula 25 (markdown) ----------------------------------------
+# ## 9. Como treinar a partir daqui
+# 
+# **Uma linha = uma safra em um município.** As colunas com prefixo `vegetativo_`, `floracao_` e
+# `enchimento_` são as que dão sentido ao trabalho: elas permitem que o Elastic Net atribua
+# pesos diferentes ao mesmo milímetro de chuva conforme o estádio em que ele caiu.
+# 
+# **Validação cruzada precisa agrupar por município.** Dois anos do mesmo município compartilham
+# solo, altitude e manejo. Um `KFold` embaralhado deixaria o município no treino e no teste ao
+# mesmo tempo, e o R² sairia inflado por memorização, não por capacidade preditiva. Use
+# `GroupKFold(groups=cod_municipio)`. Se a defesa exigir previsão de safra futura,
+# `TimeSeriesSplit` por `ano_pam` é mais honesto ainda.
+# 
+# **Min-Max dentro do fold.** Ajustar o scaler sobre a base inteira antes de dividir vaza
+# informação do teste para o treino.
+# 
+# **Filtrar por `cobertura_ciclo`.** Ciclo com metade das semanas medidas não descreve a safra.
+# 
+# **O que dizer se perguntarem pela granularidade:** o alvo é anual porque a colheita é anual;
+# o preditor é semanal porque é o que permite localizar o estresse dentro do ciclo. As duas
+# coisas se encontram na linha safra-município, que é a unidade de observação do fenômeno.
+
+# ---- célula 30 (código) -------------------------------------------
+df_pam.to_excel("checar_pam.xlsx", index=False)
+df_ciclo.to_excel("checar_ciclo.xlsx", index=False)

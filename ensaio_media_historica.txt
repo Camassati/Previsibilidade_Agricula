@@ -1,0 +1,33 @@
+df_tcc_modelo.xlsx: modelo 1460 linhas | pam_bruto 32979 linhas, safras [2016, 2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024]
+base filtrada: 920 linhas, 145 municípios
+
+1. Origem da média nova
+   {'municipio': 590, 'uf_ibge': 330}
+
+2. Parte do MUNICÍPIO tem que ser idêntica à antiga
+   linhas com média municipal: 590 | diferentes da antiga: 0  OK
+
+3. Linhas que mudam (as do reserva)
+   330 linhas mudam de valor
+   diferença absoluta: média 8.17 | mediana 4.91 | máxima 42.80 sc/ha
+   por safra: {2020: 109, 2021: 108, 2022: 28, 2023: 67, 2024: 18}
+   por UF   : {'RS': 119, 'MT': 76, 'SP': 74, 'PR': 61}
+   por cultura: {'Milho (em grão)': 144, 'Soja (em grão)': 129, 'Trigo (em grão)': 57}
+   as 10 maiores mudanças:
+      Nova Fátima / PR · Milho (em grão) · 2020: 139.20 -> 96.40 (realizado 90.82)
+      Teutônia / RS · Milho (em grão) · 2021: 63.89 -> 102.78 (realizado 110.00)
+      Curitiba / PR · Milho (em grão) · 2020: 134.92 -> 96.40 (realizado 133.57)
+      Ivaí / PR · Milho (em grão) · 2020: 134.25 -> 96.40 (realizado 149.10)
+      Cambará do Sul / RS · Milho (em grão) · 2021: 65.99 -> 102.78 (realizado 90.00)
+      Alegrete / RS · Milho (em grão) · 2021: 66.33 -> 102.78 (realizado 100.00)
+      Bagé / RS · Milho (em grão) · 2021: 70.84 -> 102.78 (realizado 50.00)
+      Serafina Corrêa / RS · Milho (em grão) · 2021: 71.95 -> 102.78 (realizado 120.00)
+      Diamante do Norte / PR · Milho (em grão) · 2020: 127.10 -> 96.40 (realizado 61.78)
+      Colombo / PR · Milho (em grão) · 2020: 65.99 -> 96.40 (realizado 134.92)
+
+4. Erro do 'método tradicional' com cada definição (todas as linhas)
+   antiga  RMSE 21.525 sc/ha  (n = 920)
+   nova    RMSE 21.704 sc/ha  (n = 920)
+   (só referência: o número oficial sai da modelagem e da robustez retreinadas)
+
+5. Linhas sem nenhuma média possível: 0

@@ -1,0 +1,1141 @@
+# ==========================================================================
+# NOTEBOOK: etl_tcc_semanal.ipynb
+# células: 26
+# ==========================================================================
+
+
+# ---- célula 0 (markdown) ----------------------------------------
+# # Calculadora Agrícola IoT — ETL da base de entrada
+# 
+# Transforma os arquivos horários do INMET em uma base **semanal por estação**, cruzada com a
+# classificação de solo, pronta para pesar os coeficientes do Elastic Net.
+# 
+# ## Por que semanal
+# 
+# A granularidade mensal diluía eventos que decidem safra. Uma seca de dez dias no
+# enchimento de grão desaparece dentro de uma média de trinta dias; numa janela de sete, ela
+# aparece. Três ganhos concretos:
+# 
+# | | Mensal | Semanal |
+# |---|---|---|
+# | Linhas para treinar | ~5.500 | **~28.000** |
+# | Resolução do estresse hídrico | 1 valor/mês | 4–5 valores/mês |
+# | Alinhamento com fenologia | grosseiro | casa com estádios (V6, R1, R5…) |
+# 
+# O custo é ruído maior por linha — uma semana tem menos observações que um mês, então vale
+# acompanhar a coluna `cobertura` de perto.
+# 
+# ## Trocar a granularidade
+# 
+# `GRANULARIDADE = "semana"` na primeira célula. Trocar para `"mes"` reproduz a base antiga
+# sem mexer em mais nada.
+# 
+# ## Semana ISO e a virada do ano
+# 
+# Semana aqui é a **semana ISO 8601**: começa na segunda e é rotulada pelo ano em que cai a
+# maior parte dela. Isso significa que 31/12/2024 pertence à semana `2025-W01`, não a 2024.
+# 
+# Esse detalhe tem consequência prática. Os arquivos do INMET são um por estação **por ano**,
+# então agregar arquivo a arquivo partiria toda semana de virada em duas semanas pela metade.
+# Para evitar isso, o pipeline consolida o diário de cada estação ao longo de todos os anos
+# **antes** de fechar as semanas.
+# 
+# ## Correções herdadas da revisão do ETL
+# 
+# | # | Problema na versão original | Correção |
+# |---|---|---|
+# | 1 | `.mean()` em todas as colunas | Regra de agregação por tipo de variável |
+# | 2 | Precipitação virava média horária | Vira **total do período** em mm |
+# | 3 | Radiação incomparável entre estações | Vira **total acumulado** |
+# | 4 | Direção do vento com média aritmética | **Média vetorial** (seno/cosseno) |
+# | 5 | Máx/mín do INMET são da **hora**, não do dia | Máx e mín calculados **por dia** |
+# | 6 | Coluna fantasma `Unnamed: 19` | Removida na leitura |
+# | 7 | Sentinela `-9999` entrava como número | Convertida para nulo |
+# | 8 | Merge de solo falhava em silêncio | Chave normalizada + relatório de cobertura |
+# | 9 | Sem noção de quantas horas geraram cada média | `dias_validos` / `cobertura` |
+# 
+# **Fluxo:** horário → diário → **consolidação por estação** → semanal.
+
+# ---- célula 1 (markdown) ----------------------------------------
+# ## 1. Configuração
+
+# ---- célula 2 (código) -------------------------------------------
+import os
+import re
+import glob
+import time
+import unicodedata
+import warnings
+from collections import defaultdict
+
+import numpy as np
+import pandas as pd
+
+warnings.filterwarnings("ignore")
+
+# ----------------------------------------------------------------- ajustes --
+CAMINHO_BASE = r"C:\Users\Camassati\Desktop\TCC\arquivos para bd tcc\inmet_historico"
+ESTADOS_ALVO = ["SP", "PR", "RS", "MT"]
+ANO_INICIAL = 2015   # série longa: precisa conter anos de quebra de safra
+
+# "semana" (ISO 8601, segunda a domingo) ou "mes"
+GRANULARIDADE = "semana"
+
+# Base de graus-dia. 10 °C cobre soja e milho; trigo usa 0 °C.
+TEMP_BASE_GDD = 10.0
+
+# Um dia entra na conta se tiver pelo menos este nº de horas válidas.
+MIN_HORAS_DIA = 18
+# Um período entra na conta se tiver pelo menos esta fração de dias válidos.
+# Em base semanal, 0.80 de 7 dias exige 6 dias medidos.
+MIN_FRACAO_DIAS = 0.80
+
+# Chuva a partir da qual o dia conta como "dia com chuva" (padrão OMM).
+LIMIAR_DIA_CHUVOSO_MM = 1.0
+
+SAIDA_XLSX = f"df_tcc_{GRANULARIDADE}.xlsx"
+
+# Cache do diário por estação-ano. Ler ~2.000 CSVs horários leva dezenas de
+# minutos; com cache, uma reexecução aproveita o que já foi lido e só processa
+# o que falta. Apagar a pasta força o reprocessamento completo.
+CACHE_DIR = "cache_diario"
+USAR_CACHE = True
+
+assert GRANULARIDADE in ("semana", "mes"), "GRANULARIDADE deve ser 'semana' ou 'mes'"
+
+os.makedirs(CACHE_DIR, exist_ok=True)
+
+print(f"Lendo de: {CAMINHO_BASE}")
+print(f"Estados: {', '.join(ESTADOS_ALVO)} | a partir de {ANO_INICIAL}")
+print(f"Granularidade: {GRANULARIDADE.upper()} | saída: {SAIDA_XLSX}")
+print(f"Cache: {CACHE_DIR} ({'ativo' if USAR_CACHE else 'desativado'})")
+
+# ---- célula 3 (markdown) ----------------------------------------
+# ## 2. Leitura robusta dos arquivos do INMET
+# 
+# O layout dos arquivos muda de ano para ano: o cabeçalho às vezes tem 8 linhas, às vezes 9, e
+# os nomes das colunas variam. Em vez de fixar `skiprows=8`, a linha de cabeçalho é
+# **localizada** e os nomes são normalizados para chaves internas estáveis.
+
+# ---- célula 4 (código) -------------------------------------------
+# Fragmentos identificadores, EM ORDEM DE PRIORIDADE (o primeiro que casar vence).
+#
+# Atenção: NÃO usar "hora" como fragmento genérico. Metade das colunas do INMET
+# contém "NA HORA ANT." no nome ("PRESSÃO ATMOSFERICA MAX.NA HORA ANT.",
+# "TEMPERATURA ORVALHO MIN. NA HORA ANT."), então um fragmento "hora" captura
+# todas elas de uma vez. Data e hora são identificadas por posição.
+MAPA_COLUNAS = [
+    ("precipitacao total",             "precipitacao"),
+    ("pressao atmosferica ao nivel",   "pressao"),
+    ("radiacao global",                "radiacao"),
+    ("temperatura orvalho max",        "orvalho_max"),
+    ("temperatura orvalho min",        "orvalho_min"),
+    ("temperatura do ponto de orvalho", "orvalho"),
+    ("temperatura do ar",              "temp_ar"),
+    ("temperatura maxima",             "temp_max"),
+    ("temperatura minima",             "temp_min"),
+    ("umidade rel. max",               "umidade_max"),
+    ("umidade rel. min",               "umidade_min"),
+    ("umidade relativa max",           "umidade_max"),
+    ("umidade relativa min",           "umidade_min"),
+    ("umidade relativa do ar",         "umidade"),
+    ("vento, direcao",                 "vento_dir"),
+    ("vento direcao",                  "vento_dir"),
+    ("vento, rajada",                  "vento_rajada"),
+    ("vento rajada",                   "vento_rajada"),
+    ("vento, velocidade",              "vento_vel"),
+    ("vento velocidade",               "vento_vel"),
+]
+
+# Faixas fisicamente possíveis. Fora disso é erro de sensor, não clima.
+LIMITES_FISICOS = {
+    "temp_ar":      (-15, 50),
+    "temp_max":     (-15, 50),
+    "temp_min":     (-15, 50),
+    "orvalho":      (-25, 35),
+    "orvalho_max":  (-25, 35),
+    "orvalho_min":  (-25, 35),
+    "umidade":      (0, 100),
+    "umidade_max":  (0, 100),
+    "umidade_min":  (0, 100),
+    "pressao":      (800, 1060),
+    "precipitacao": (0, 150),      # mm em UMA hora
+    "radiacao":     (0, 6000),     # kJ/m² em UMA hora
+    "vento_vel":    (0, 60),
+    "vento_rajada": (0, 100),
+    "vento_dir":    (0, 360),
+}
+
+SENTINELAS = [-9999, -9999.0, "-9999", "null", "NULL", ""]
+
+
+def normalizar(texto):
+    """Remove acento, baixa a caixa e colapsa espaços."""
+    if not isinstance(texto, str):
+        return ""
+    t = unicodedata.normalize("NFKD", texto)
+    t = "".join(ch for ch in t if not unicodedata.combining(ch))
+    return re.sub(r"\s+", " ", t).strip().lower()
+
+
+def achar_linha_cabecalho(caminho, limite=15):
+    """Índice da linha que contém o cabeçalho real das medições."""
+    with open(caminho, "r", encoding="latin1", errors="ignore") as fh:
+        for i, linha in enumerate(fh):
+            if i >= limite:
+                break
+            n = normalizar(linha)
+            if "data" in n and ("hora" in n or "precipitacao" in n):
+                return i
+    return 8
+
+
+def renomear_colunas(df):
+    """Traduz os nomes do INMET para as chaves internas, sem colisão."""
+    novo, ja_usados = {}, set()
+    for pos, col in enumerate(df.columns):
+        n = normalizar(col)
+        if pos == 0 or n == "data" or n.startswith("data "):
+            novo[col] = "data"
+            continue
+        if pos == 1 or n in ("hora", "hora utc") or n.startswith("hora utc"):
+            novo[col] = "hora"
+            continue
+        for fragmento, interno in MAPA_COLUNAS:
+            if fragmento in n and interno not in ja_usados:
+                novo[col] = interno
+                ja_usados.add(interno)
+                break
+    return df.rename(columns=novo)
+
+
+def converter_datas(serie):
+    """INMET usa AAAA/MM/DD em alguns anos e DD/MM/AAAA em outros.
+
+    Testar formatos explícitos evita o erro silencioso de `dayfirst=True`,
+    que lê 2023/01/05 como 5 de janeiro em um arquivo e 1 de maio em outro.
+    """
+    if serie.dropna().empty:
+        return pd.to_datetime(serie, errors="coerce")
+    for formato in ("%Y/%m/%d", "%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y"):
+        convertido = pd.to_datetime(serie, format=formato, errors="coerce")
+        if convertido.notna().mean() > 0.95:
+            return convertido
+    return pd.to_datetime(serie, errors="coerce", dayfirst=True)
+
+
+def ler_arquivo_inmet(caminho):
+    """Lê um CSV horário do INMET já limpo, ou devolve None se não der."""
+    df = pd.read_csv(
+        caminho, sep=";", skiprows=achar_linha_cabecalho(caminho),
+        encoding="latin1", decimal=",", na_values=SENTINELAS, keep_default_na=True,
+    )
+
+    # Colunas fantasma nascem do ";" no fim de cada linha.
+    df = df.loc[:, ~df.columns.str.contains(r"^Unnamed", na=False)]
+    df = df.dropna(axis=1, how="all")
+    df = renomear_colunas(df)
+
+    if "data" not in df.columns:
+        return None
+
+    df["data"] = converter_datas(df["data"])
+    df = df.dropna(subset=["data"])
+
+    for col in LIMITES_FISICOS:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    # Sentinelas que escaparam + valores fisicamente impossíveis viram nulo.
+    for col, (minimo, maximo) in LIMITES_FISICOS.items():
+        if col in df.columns:
+            df.loc[df[col] <= -900, col] = np.nan
+            df.loc[(df[col] < minimo) | (df[col] > maximo), col] = np.nan
+
+    return df
+
+
+def limpar_nome_cidade(nome):
+    """Padroniza o nome da cidade para o merge não falhar por espaço/hífen."""
+    n = nome.upper().strip()
+    n = re.sub(r"\s*-\s*", " - ", n)   # "PORTO ALEGRE- BELEM" -> "PORTO ALEGRE - BELEM"
+    n = re.sub(r"\s+", " ", n)          # "SAO FELIX  DO" -> "SAO FELIX DO"
+    return n
+
+
+def extrair_metadados(nome_arquivo):
+    """INMET_CO_MT_A901_CUIABA_01-01-2023_A_31-12-2023.CSV -> (MT, A901, CUIABA)"""
+    base = os.path.basename(nome_arquivo).upper().replace(".CSV", "")
+    partes = base.split("_")
+    if len(partes) < 5:
+        return None
+    uf, cod_estacao = partes[2], partes[3]
+    pedacos = []
+    for p in partes[4:]:
+        if re.match(r"^\d{2}-\d{2}-\d{4}$", p) or p == "A":
+            break
+        pedacos.append(p)
+    return uf, cod_estacao, limpar_nome_cidade(" ".join(pedacos).strip())
+
+
+print("Funções de leitura carregadas.")
+
+# ---- célula 5 (markdown) ----------------------------------------
+# ## 3. Agregação horária → diária
+# 
+# O dia é o degrau obrigatório. Máxima, mínima, amplitude térmica e graus-dia são grandezas
+# **diárias** por definição — agregar direto de horário para semanal as calcularia errado.
+# 
+# Cada variável tem a regra que faz sentido para ela:
+# 
+# - **Precipitação e radiação são fluxos acumulados** — a pergunta é *quanto choveu*, não *qual
+#   a média por hora*. Somar também resolve a inconsistência entre estações que gravam `0` à
+#   noite e estações que deixam em branco: nos dois casos a soma dá o mesmo total.
+# - **Direção do vento é circular** — a média aritmética de 350° e 10° dá 180°, a direção
+#   oposta à real. Precisa de média vetorial.
+# - **Máxima e mínima do INMET são da hora anterior** — o extremo do dia é o máximo (e o
+#   mínimo) *dessas* colunas ao longo das 24 horas, não a média delas.
+
+# ---- célula 6 (código) -------------------------------------------
+def pressao_vapor_saturacao(temp_c):
+    """Tetens: pressão de vapor de saturação em kPa."""
+    return 0.6108 * np.exp(17.27 * temp_c / (temp_c + 237.3))
+
+
+# O INMET publica em UTC. No recorte do trabalho o dia agronômico é local:
+# sem isso, a "mínima do dia" pode ser importada da madrugada anterior.
+FUSO_POR_UF = {"SP": -3, "PR": -3, "RS": -3, "MT": -4}
+
+# Colunas que descrevem o INTERVALO que TERMINA na hora do registro
+# ("NA HORA ANT." no cabeçalho do INMET, e os acumulados horários).
+# O registro das 00:00 descreve 23h-24h do dia ANTERIOR.
+COLUNAS_HORA_ANTERIOR = ["precipitacao", "radiacao", "temp_max", "temp_min",
+                         "umidade_max", "umidade_min", "pressao_max",
+                         "pressao_min", "orvalho_max", "orvalho_min",
+                         "vento_rajada"]
+
+
+def agregar_para_diario(df, uf=None):
+    """Horário -> diário, cada variável com sua regra."""
+    df = df.copy()
+
+    # Hora local, não UTC.
+    fuso = FUSO_POR_UF.get(uf, -3)
+    df["data"] = df["data"] + pd.Timedelta(hours=fuso)
+
+    # Dia do instante (variáveis instantâneas) e dia do intervalo que termina
+    # naquele instante (acumulados e máx/mín "na hora anterior").
+    df["dia"] = df["data"].dt.normalize()
+    df["dia_intervalo"] = (df["data"] - pd.Timedelta(hours=1)).dt.normalize()
+
+    def col(nome):
+        return df[nome] if nome in df.columns else pd.Series(np.nan, index=df.index)
+
+    porDia = df["dia"]
+    porIntervalo = df["dia_intervalo"]
+    diario = pd.DataFrame(index=df.groupby("dia").size().index)
+
+    # Horas válidas POR VARIÁVEL. Usar só a temperatura como juiz descartava
+    # chuva e radiação íntegras, e deixava passar somatórios parciais.
+    diario["horas_validas"]      = col("temp_ar").groupby(porDia).count()
+    diario["horas_chuva"]        = col("precipitacao").groupby(porIntervalo).count()
+    diario["horas_radiacao"]     = col("radiacao").groupby(porIntervalo).count()
+    diario["horas_umidade"]      = col("umidade").groupby(porDia).count()
+
+    # --- acumulados: SOMA, no dia do INTERVALO ---
+    diario["precipitacao_mm"] = col("precipitacao").groupby(porIntervalo).sum(min_count=1)
+    diario["radiacao_kjm2"]   = col("radiacao").groupby(porIntervalo).sum(min_count=1)
+
+    # --- estados instantâneos: MÉDIA ---
+    diario["temp_media"]    = col("temp_ar").groupby(porDia).mean()
+    diario["umidade_media"] = col("umidade").groupby(porDia).mean()
+    diario["pressao_media"] = col("pressao").groupby(porDia).mean()
+    diario["orvalho_medio"] = col("orvalho").groupby(porDia).mean()
+    diario["vento_medio"]   = col("vento_vel").groupby(porDia).mean()
+
+    # --- extremos DO DIA: máximo das máximas horárias, mínimo das mínimas ---
+    # Máx/mín "na hora anterior" entram pelo dia do intervalo.
+    usa_hora_ant = "temp_max" in df.columns
+    tmax_fonte = "temp_max" if usa_hora_ant else "temp_ar"
+    tmin_fonte = "temp_min" if "temp_min" in df.columns else "temp_ar"
+    chave_max = porIntervalo if usa_hora_ant else porDia
+    chave_min = porIntervalo if "temp_min" in df.columns else porDia
+    diario["temp_max"] = col(tmax_fonte).groupby(chave_max).max()
+    diario["temp_min"] = col(tmin_fonte).groupby(chave_min).min()
+    # Rastro de procedência: onde não há a coluna "na hora ant.", a "máxima" é
+    # o maior valor instantâneo horário — sistematicamente mais baixo, e não
+    # comparável entre estações sem esta marca.
+    diario["tmax_origem"] = "hora_ant" if usa_hora_ant else "instantanea"
+
+    tem_umin = "umidade_min" in df.columns
+    umin_fonte = "umidade_min" if tem_umin else "umidade"
+    diario["umidade_min"]  = col(umin_fonte).groupby(
+        porIntervalo if tem_umin else porDia).min()
+    diario["vento_rajada"] = col("vento_rajada").groupby(porIntervalo).max()
+
+    # --- circular: decompõe em seno/cosseno, faz a média, recompõe o ângulo ---
+    if "vento_dir" in df.columns:
+        rad = np.radians(df["vento_dir"])
+        comp = pd.DataFrame({"dia": porDia, "sen": np.sin(rad), "cos": np.cos(rad)}
+                            ).groupby("dia").mean()
+        resultante = np.hypot(comp["sen"], comp["cos"])
+        angulo = np.degrees(np.arctan2(comp["sen"], comp["cos"])) % 360
+        diario["vento_dir"] = angulo.where(resultante >= 1e-9)
+        diario["vento_dir_cons"] = resultante
+    else:
+        diario["vento_dir"] = np.nan
+        diario["vento_dir_cons"] = np.nan
+
+    # --- derivadas agronômicas ---
+    # Graus-dia: energia térmica que a planta efetivamente usa naquele dia.
+    media_termica = (diario["temp_max"] + diario["temp_min"]) / 2
+    diario["graus_dia"] = (media_termica - TEMP_BASE_GDD).clip(lower=0)
+
+    # VPD: quanto a atmosfera "puxa" água da planta.
+    # Calculado HORA A HORA e só depois agregado. Tetens é convexa, então
+    # es(média de T) < média de es(T): calcular a partir da média diária
+    # subestima o estresse justamente nos dias de maior amplitude térmica,
+    # e o pico de demanda do meio-dia nunca apareceria na base.
+    vpd_h = (pressao_vapor_saturacao(col("temp_ar"))
+             * (1 - col("umidade") / 100)).clip(lower=0)
+    diario["vpd_kpa"]     = vpd_h.groupby(porDia).mean()
+    diario["vpd_max_dia"] = vpd_h.groupby(porDia).max()
+
+    diario["amplitude_termica"] = diario["temp_max"] - diario["temp_min"]
+
+    # Dia incompleto não vira média confiável — mas o juiz é a contagem de
+    # horas DA PRÓPRIA variável. Um pluviômetro íntegro não deve ser descartado
+    # porque o termômetro falhou, nem um somatório com 6 horas deve passar
+    # porque o termômetro estava bom.
+    CONTADORES = ["horas_validas", "horas_chuva", "horas_radiacao",
+                  "horas_umidade", "tmax_origem"]
+    POR_VARIAVEL = {
+        "precipitacao_mm": "horas_chuva",
+        "radiacao_kjm2":   "horas_radiacao",
+        "umidade_media":   "horas_umidade",
+        "umidade_min":     "horas_umidade",
+    }
+    termicas = [c for c in diario.columns
+                if c not in CONTADORES and c not in POR_VARIAVEL]
+    diario.loc[diario["horas_validas"] < MIN_HORAS_DIA, termicas] = np.nan
+    for alvo, contador in POR_VARIAVEL.items():
+        if alvo in diario.columns:
+            diario.loc[diario[contador].fillna(0) < MIN_HORAS_DIA, alvo] = np.nan
+
+    return diario.reset_index()
+
+
+print("Agregação diária definida.")
+
+# ---- célula 7 (markdown) ----------------------------------------
+# ## 4. Agregação diária → semanal
+# 
+# A semana é a unidade de entrada do modelo. Duas variáveis merecem atenção:
+# 
+# - **`maior_veranico`** — a maior sequência de dias secos *dentro* do período. Numa semana ela
+#   satura em 7, então sozinha diz pouco.
+# - **`dias_secos_acumulados`** — dias secos consecutivos contados **até o último dia da
+#   semana, atravessando semanas anteriores**. É esta que mede seca de verdade em base semanal:
+#   uma estiagem de 20 dias aparece como 7, 14, 21 em semanas consecutivas, enquanto
+#   `maior_veranico` marcaria 7, 7, 7. Só é calculável porque o diário de cada estação foi
+#   consolidado antes.
+
+# ---- célula 8 (código) -------------------------------------------
+def chaves_periodo(dias, granularidade):
+    """Devolve (chave_int, rotulo) para cada dia, conforme a granularidade.
+
+    Semana ISO: 2024-12-31 pertence a 2025-W01. O ano da chave é o ano ISO,
+    que pode diferir do ano civil na virada — é assim mesmo, por definição.
+    """
+    if granularidade == "semana":
+        iso = dias.dt.isocalendar()
+        chave = iso["year"].astype(int) * 100 + iso["week"].astype(int)
+        rotulo = (iso["year"].astype(int).astype(str) + "-W"
+                  + iso["week"].astype(int).astype(str).str.zfill(2))
+    else:
+        chave = dias.dt.year * 100 + dias.dt.month
+        rotulo = dias.dt.strftime("%Y-%m")
+    return chave.astype(int), rotulo
+
+
+def maior_sequencia_seca(chuva, limiar=LIMIAR_DIA_CHUVOSO_MM):
+    """Maior nº de dias consecutivos secos. Dia sem medição INTERROMPE a conta.
+
+    fillna(0) transformaria "não sei" em "não choveu", e o veranico passaria a
+    medir falha de sensor — exatamente nas estações e anos com mais buraco.
+    Na dúvida a sequência é cortada: subestimar o veranico é o erro seguro.
+    """
+    maior = atual = 0
+    for v in chuva.values:
+        if pd.isna(v):
+            atual = 0
+        else:
+            atual = atual + 1 if v < limiar else 0
+            maior = max(maior, atual)
+    return int(maior)
+
+
+def dias_secos_corridos(diario_estacao, limiar=LIMIAR_DIA_CHUVOSO_MM):
+    """Para cada dia, há quantos dias seguidos não chove — atravessando períodos.
+
+    A série é reindexada para o calendário completo antes de contar: dias
+    ausentes não existiam como linha, então 10/jan e 20/mar eram tratados como
+    consecutivos. Dia sem medição zera o contador (vira NaN).
+    """
+    d = diario_estacao.set_index("dia").sort_index()
+    calendario = pd.date_range(d.index.min(), d.index.max(), freq="D")
+    chuva = d["precipitacao_mm"].reindex(calendario)
+
+    saida, atual = [], 0
+    for v in chuva.values:
+        if pd.isna(v):
+            atual = 0
+            saida.append(np.nan)
+        else:
+            atual = atual + 1 if v < limiar else 0
+            saida.append(atual)
+    serie = pd.Series(saida, index=calendario)
+    return serie.reindex(d.index).values
+
+
+def agregar_para_periodo(diario, granularidade=None):
+    """Diário (de UMA estação, já consolidado) -> período."""
+    granularidade = granularidade or GRANULARIDADE
+    d = diario.sort_values("dia").reset_index(drop=True).copy()
+
+    d["periodo"], d["periodo_label"] = chaves_periodo(d["dia"], granularidade)
+    d["dias_secos_acum"] = dias_secos_corridos(d)
+
+    linhas = []
+    for periodo, bloco in d.groupby("periodo", sort=True):
+        if granularidade == "semana":
+            dias_no_periodo = 7
+        else:
+            dias_no_periodo = pd.Period(bloco["dia"].iloc[0], freq="M").days_in_month
+
+        dias_validos = int(bloco["temp_media"].notna().sum())
+
+        linhas.append({
+            "periodo": periodo,
+            "periodo_label": bloco["periodo_label"].iloc[0],
+            "data_inicio": bloco["dia"].min(),
+            "data_fim": bloco["dia"].max(),
+            "dias_validos": dias_validos,
+            "dias_no_periodo": dias_no_periodo,
+            "cobertura": round(dias_validos / dias_no_periodo, 3),
+
+            # temperatura
+            "temp_media":        bloco["temp_media"].mean(),
+            "temp_max_media":    bloco["temp_max"].mean(),
+            "temp_min_media":    bloco["temp_min"].mean(),
+            "temp_max_abs":      bloco["temp_max"].max(),
+            "temp_min_abs":      bloco["temp_min"].min(),
+            "amplitude_termica": bloco["amplitude_termica"].mean(),
+            "graus_dia_acum":    bloco["graus_dia"].sum(min_count=1),
+
+            # água
+            "precipitacao_total_mm": bloco["precipitacao_mm"].sum(min_count=1),
+            "dias_com_chuva":        int((bloco["precipitacao_mm"] >= LIMIAR_DIA_CHUVOSO_MM).sum()),
+            "maior_veranico":        maior_sequencia_seca(bloco["precipitacao_mm"]),
+            "dias_secos_acumulados": (float(bloco["dias_secos_acum"].iloc[-1])
+                                      if pd.notna(bloco["dias_secos_acum"].iloc[-1])
+                                      else np.nan),
+            "umidade_media":         bloco["umidade_media"].mean(),
+            "umidade_min_abs":       bloco["umidade_min"].min(),
+            "vpd_medio_kpa":         bloco["vpd_kpa"].mean(),
+            # pico horário real; antes era o máximo entre VPDs MÉDIOS diários,
+            # e o pico de demanda do meio-dia nunca aparecia na base
+            "vpd_max_kpa":           (bloco["vpd_max_dia"].max()
+                                      if "vpd_max_dia" in bloco.columns
+                                      else bloco["vpd_kpa"].max()),
+            "orvalho_medio":         bloco["orvalho_medio"].mean(),
+
+            # energia
+            "radiacao_total_mjm2": bloco["radiacao_kjm2"].sum(min_count=1) / 1000.0,
+
+            # atmosfera / vento
+            "pressao_media":    bloco["pressao_media"].mean(),
+            "vento_medio":      bloco["vento_medio"].mean(),
+            "vento_rajada_max": bloco["vento_rajada"].max(),
+            "vento_dir_predom": media_direcao_circular(bloco["vento_dir"]),
+            "vento_dir_consistencia": bloco["vento_dir_cons"].mean(),
+        })
+
+    periodico = pd.DataFrame(linhas)
+
+    # Período com poucos dias não representa o período.
+    incompleto = periodico["cobertura"] < MIN_FRACAO_DIAS
+    medidas = periodico.columns.difference(
+        ["periodo", "periodo_label", "data_inicio", "data_fim",
+         "dias_validos", "dias_no_periodo", "cobertura"])
+    periodico.loc[incompleto, medidas] = np.nan
+
+    return periodico
+
+
+def media_direcao_circular(series):
+    """Média vetorial de ângulos em grau. Devolve 0-360, ou NaN se não houver dado."""
+    s = series.dropna()
+    if len(s) == 0:
+        return np.nan
+    rad = np.radians(s.values)
+    seno, cosseno = np.sin(rad).mean(), np.cos(rad).mean()
+    if np.hypot(seno, cosseno) < 1e-9:   # vetores se anulam: sem direção dominante
+        return np.nan
+    return float(np.degrees(np.arctan2(seno, cosseno)) % 360)
+
+
+print(f"Agregação por {GRANULARIDADE} definida.")
+
+# ---- célula 9 (markdown) ----------------------------------------
+# ## 5. Processamento de todos os arquivos
+# 
+# A ordem aqui importa. O diário de cada estação é acumulado ao longo de **todos** os anos e só
+# então agregado por semana. Fechar as semanas arquivo a arquivo partiria em duas toda semana
+# que atravessa a virada do ano — e, com três anos de dados, isso corromperia duas semanas por
+# estação.
+
+# ---- célula 10 (código) -------------------------------------------
+# Parquet é menor e tipado, mas exige pyarrow. Como isso é só cache local,
+# cair para pickle quando pyarrow não estiver instalado evita travar o pipeline
+# por causa de uma dependência opcional.
+try:
+    import pyarrow  # noqa: F401
+    FORMATO_CACHE = "parquet"
+except ImportError:
+    FORMATO_CACHE = "pickle"
+
+
+# Versão do cache. A agregação diária mudou (fuso local, realinhamento da
+# "hora anterior", VPD horário, nulificação por variável), então o diário
+# guardado pela versão anterior está errado. Mudar este número força a
+# releitura dos CSVs; o cache antigo fica no disco, inofensivo.
+VERSAO_CACHE = 2
+
+
+def caminho_cache(uf, cod_estacao, ano):
+    ext = "parquet" if FORMATO_CACHE == "parquet" else "pkl"
+    return os.path.join(CACHE_DIR, f"v{VERSAO_CACHE}_{uf}_{cod_estacao}_{ano}.{ext}")
+
+
+def ler_cache(caminho):
+    return (pd.read_parquet(caminho) if FORMATO_CACHE == "parquet"
+            else pd.read_pickle(caminho))
+
+
+def gravar_cache(df, caminho):
+    if FORMATO_CACHE == "parquet":
+        df.to_parquet(caminho, index=False)
+    else:
+        df.to_pickle(caminho)
+
+
+def diario_do_arquivo(caminho, uf, cod_estacao, ano):
+    """Diário de um arquivo, usando cache quando disponível.
+
+    Ler ~2.000 CSVs horários leva dezenas de minutos. Guardar o diário de cada
+    estação-ano em parquet faz a segunda execução custar segundos, e permite
+    retomar de onde parou se algo interromper no meio.
+    """
+    alvo = caminho_cache(uf, cod_estacao, ano)
+
+    if USAR_CACHE and os.path.exists(alvo):
+        return ler_cache(alvo), True   # (dados, veio_do_cache)
+
+    bruto = ler_arquivo_inmet(caminho)
+    if bruto is None or bruto.empty:
+        return None, False
+
+    diario = agregar_para_diario(bruto, uf=uf)
+    if USAR_CACHE:
+        gravar_cache(diario, alvo)
+    return diario, False
+
+
+def processar_tudo(caminho_base, granularidade=None):
+    granularidade = granularidade or GRANULARIDADE
+    diarios_por_estacao = defaultdict(list)
+    registro = []      # log estruturado, uma linha por arquivo
+
+    padrao = os.path.join(caminho_base, "ano_*", "*.CSV")
+    arquivos = sorted(set(glob.glob(padrao) + glob.glob(padrao.replace(".CSV", ".csv"))))
+
+    # filtra antes de começar, para o contador de progresso fazer sentido
+    elegiveis = []
+    for caminho in arquivos:
+        ano_pasta = os.path.basename(os.path.dirname(caminho)).split("_")[-1]
+        if not (ano_pasta.isdigit() and int(ano_pasta) >= ANO_INICIAL):
+            continue
+        meta = extrair_metadados(caminho)
+        if meta is None:
+            registro.append({"arquivo": os.path.basename(caminho), "ano": ano_pasta,
+                             "status": "nome fora do padrão"})
+            continue
+        uf, cod_estacao, cidade = meta
+        if uf not in ESTADOS_ALVO:
+            continue
+        elegiveis.append((caminho, int(ano_pasta), uf, cod_estacao, cidade))
+
+    total = len(elegiveis)
+    print(f"{total} arquivos elegíveis ({ANO_INICIAL}+, {len(ESTADOS_ALVO)} UFs)\n")
+
+    inicio = time.time()
+    n_cache = 0
+
+    # ---------- passo 1: horário -> diário, acumulando por estação ----------
+    for i, (caminho, ano, uf, cod_estacao, cidade) in enumerate(elegiveis, 1):
+        try:
+            diario, do_cache = diario_do_arquivo(caminho, uf, cod_estacao, ano)
+            n_cache += int(do_cache)
+
+            if diario is None or diario.empty:
+                registro.append({"arquivo": os.path.basename(caminho), "ano": ano,
+                                 "UF": uf, "estacao": cod_estacao,
+                                 "status": "sem linhas úteis", "dias": 0})
+                continue
+
+            diarios_por_estacao[(uf, cidade, cod_estacao)].append(diario)
+            registro.append({"arquivo": os.path.basename(caminho), "ano": ano,
+                             "UF": uf, "estacao": cod_estacao,
+                             "status": "cache" if do_cache else "lido",
+                             "dias": len(diario)})
+
+        except Exception as erro:
+            registro.append({"arquivo": os.path.basename(caminho), "ano": ano,
+                             "UF": uf, "estacao": cod_estacao,
+                             "status": f"ERRO: {str(erro)[:70]}", "dias": 0})
+
+        if i % 100 == 0 or i == total:
+            passado = time.time() - inicio
+            resta = passado / i * (total - i)
+            print(f"  {i:5d}/{total}  ({100*i/total:5.1f}%)  "
+                  f"decorrido {passado/60:5.1f} min  "
+                  f"restante ~{resta/60:5.1f} min  "
+                  f"[cache: {n_cache}]")
+
+    df_registro = pd.DataFrame(registro)
+
+    if not diarios_por_estacao:
+        print("\nNenhuma estação acumulada. Status registrado:")
+        if len(df_registro):
+            print(df_registro["status"].value_counts().to_string())
+            print("\nPrimeiras ocorrências:")
+            print(df_registro.head(5).to_string(index=False))
+        raise RuntimeError(
+            "Nenhum arquivo processado. Veja o status acima — se for 'ERRO', "
+            "a causa está na mensagem; se for 'nome fora do padrão', confira "
+            "o padrão de nomes dos CSVs.")
+
+    # ---------- passo 2: consolida o diário e só então fecha os períodos ----------
+    print(f"\nConsolidando {len(diarios_por_estacao)} estações...")
+    blocos = []
+    for (uf, cidade, cod_estacao), pedacos in diarios_por_estacao.items():
+        diario = pd.concat(pedacos, ignore_index=True)
+        diario = diario.drop_duplicates(subset=["dia"]).sort_values("dia")
+
+        periodico = agregar_para_periodo(diario, granularidade)
+        periodico.insert(1, "UF", uf)
+        periodico.insert(2, "Cidade", cidade)
+        periodico.insert(3, "Cod_Estacao", cod_estacao)
+        blocos.append(periodico)
+
+    df = pd.concat(blocos, ignore_index=True)
+    df = df.sort_values(["Cod_Estacao", "periodo"]).reset_index(drop=True)
+
+    # ---------- resumo ----------
+    print(f"\n{'=' * 58}")
+    print("RESUMO DA LEITURA")
+    print("=" * 58)
+    print(df_registro["status"].value_counts().to_string())
+    erros = df_registro[df_registro["status"].str.startswith("ERRO", na=False)]
+    if len(erros):
+        print(f"\n{len(erros)} arquivos com erro (primeiros 10):")
+        print(erros[["arquivo", "status"]].head(10).to_string(index=False))
+
+    return df, df_registro
+
+
+df_clima, df_registro = processar_tudo(CAMINHO_BASE)
+
+print(f"\nBase climática: {df_clima.shape[0]} linhas x {df_clima.shape[1]} colunas")
+print(f"Estações: {df_clima['Cod_Estacao'].nunique()} "
+      f"| períodos: {df_clima['periodo'].nunique()} "
+      f"({df_clima['periodo_label'].min()} a {df_clima['periodo_label'].max()})")
+df_clima.head()
+
+# ---- célula 11 (markdown) ----------------------------------------
+# ## 5b. Inventário de cobertura
+# 
+# Com onze safras, nem toda estação tem histórico completo — algumas entraram em operação no
+# meio do período, outras saíram do ar por temporadas. Isso não é defeito, mas precisa estar
+# declarado: uma estação com três anos pesa menos que uma com onze, e a banca pode perguntar
+# quantas safras cada ponto realmente cobre.
+
+# ---- célula 12 (código) -------------------------------------------
+def inventario_cobertura(df, registro):
+    ano_do_periodo = df["periodo"] // 100
+
+    por_estacao = (df.assign(ano=ano_do_periodo)
+                     .groupby(["UF", "Cidade", "Cod_Estacao"])
+                     .agg(anos=("ano", "nunique"),
+                          periodos=("periodo", "nunique"),
+                          primeiro=("periodo_label", "min"),
+                          ultimo=("periodo_label", "max"),
+                          cobertura_media=("cobertura", "mean"))
+                     .reset_index()
+                     .sort_values("anos"))
+    por_estacao["cobertura_media"] = por_estacao["cobertura_media"].round(3)
+
+    anos_possiveis = ano_do_periodo.nunique()
+
+    print("=" * 60)
+    print("INVENTÁRIO DE COBERTURA")
+    print("=" * 60)
+    print(f"\nAnos no período: {anos_possiveis}")
+    print(f"Estações: {len(por_estacao)}")
+
+    print("\nDistribuição de anos por estação:")
+    faixas = pd.cut(por_estacao["anos"], bins=[0, 3, 6, 9, 99],
+                    labels=["1-3 anos", "4-6 anos", "7-9 anos", "10+ anos"])
+    print(faixas.value_counts().sort_index().to_string())
+
+    completas = int((por_estacao["anos"] >= anos_possiveis).sum())
+    print(f"\nEstações com o período completo: {completas} "
+          f"({100*completas/len(por_estacao):.0f}%)")
+
+    print("\n10 estações com menor histórico:")
+    print(por_estacao.head(10)[
+        ["UF", "Cidade", "anos", "primeiro", "ultimo", "cobertura_media"]
+    ].to_string(index=False))
+
+    # matriz estação x ano: onde exatamente estão os buracos
+    matriz = (df.assign(ano=ano_do_periodo)
+                .pivot_table(index="Cod_Estacao", columns="ano",
+                             values="periodo", aggfunc="nunique")
+                .fillna(0).astype(int))
+    print(f"\nSemanas por ano (mediana entre estações):")
+    print(matriz.median().astype(int).to_string())
+
+    return por_estacao, matriz
+
+
+df_inventario, matriz_cobertura = inventario_cobertura(df_clima, df_registro)
+
+# ---- célula 13 (markdown) ----------------------------------------
+# ## 6. Base de solos
+# 
+# Duas mudanças em relação à versão original.
+# 
+# **A tabela ganhou atributos numéricos.** Texto (`'Argilosa'`, a descrição em prosa) não entra
+# em regressão. As colunas novas — retenção de água, drenagem, aptidão para grãos,
+# profundidade — são ordinais de 1 a 5 e vão direto para o modelo, que é o que dá sentido a um
+# coeficiente de solo.
+# 
+# **O mapa cidade → solo virou uma tabela auditável.** A versão original tentou mapear por
+# cidade, o merge devolveu `NaN` em tudo e o erro passou despercebido; o passo seguinte aplicou
+# uma regra por estado inteiro, colapsando 180 estações em 2 classes. Aqui cada linha declara
+# sua `fonte`, o fallback é explícito, e no fim sai um **relatório de cobertura**.
+# 
+# > ⚠️ **Preencher antes de defender o TCC.** As linhas marcadas `fallback_uf` são aproximação,
+# > não levantamento pedológico. A fonte correta é o *Mapa de Solos do Brasil* (EMBRAPA/IBGE)
+# > ou o SiBCS por município. O próprio TCC define o agrônomo como stakeholder responsável por
+# > validar esses parâmetros.
+
+# ---- célula 14 (código) -------------------------------------------
+df_solo = pd.DataFrame({
+    "id_solo": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    "nome_solo": [
+        "Latossolo Vermelho", "Latossolo Amarelo", "Argissolo Vermelho-Amarelo",
+        "Neossolo Quartzarênico", "Cambissolo Háplico", "Vertissolo Háplico",
+        "Neossolo Litólico", "Gleissolo Háplico", "Espodossolo Ferrocárbico",
+        "Plintossolo Argilúvico",
+    ],
+    "ordem_solo": [
+        "Latossolo", "Latossolo", "Argissolo", "Neossolo", "Cambissolo",
+        "Vertissolo", "Neossolo", "Gleissolo", "Espodossolo", "Plintossolo",
+    ],
+    "textura": [
+        "Argilosa", "Média/Argilosa", "Média/Argilosa", "Arenosa", "Diferenciada",
+        "Muito Argilosa", "Rasa/Diferenciada", "Argilosa/Siltosa", "Arenosa",
+        "Média/Argilosa",
+    ],
+    # --- ordinais 1-5: é isto que o Elastic Net consegue usar ---
+    "retencao_agua": [4, 4, 3, 1, 3, 5, 1, 5, 1, 3],
+    "drenagem":      [5, 5, 4, 5, 3, 2, 4, 1, 5, 2],
+    "aptidao_graos": [5, 4, 4, 2, 2, 3, 1, 2, 1, 2],
+    "profundidade":  [5, 5, 4, 4, 2, 3, 1, 3, 4, 3],
+    "risco_erosao":  [1, 1, 4, 3, 4, 3, 5, 1, 2, 3],
+    "culturas_predominantes": [
+        "Soja, Milho, Trigo", "Soja, Milho", "Trigo, Milho, Pastagem",
+        "Soja (com irrigação), Pastagem", "Trigo, Pastagem", "Arroz irrigado, Soja",
+        "Pastagem nativa", "Arroz irrigado", "Pastagem", "Pastagem, Arroz",
+    ],
+    "descricao": [
+        "Solo profundo e bem drenado. Excelente retenção de nutrientes, ideal para grãos.",
+        "Solo profundo, exige correção com calcário para alta produtividade de grãos.",
+        "Gradiente textural. Bom para trigo no Sul, mas exige cuidado com erosão.",
+        "Arenoso e muito drenado. Exige irrigação e manejo de precisão para grãos.",
+        "Raso e acidentado. Uso restrito para agricultura mecanizada.",
+        "Argiloso, racha no seco e alaga na chuva. Exige manejo específico.",
+        "Muito raso, com rochas. Inadequado para agricultura intensiva de grãos.",
+        "Hidromórfico, frequentemente alagado. Condição ideal para arroz irrigado.",
+        "Arenoso e pobre em nutrientes. Baixa aptidão para grãos sem alto investimento.",
+        "Restrição temporária de drenagem. Uso limitado para culturas de sequeiro.",
+    ],
+})
+
+ESCALAS_ORDINAIS = ["retencao_agua", "drenagem", "aptidao_graos",
+                    "profundidade", "risco_erosao"]
+
+print(f"Tabela de solos: {len(df_solo)} classes, {len(ESCALAS_ORDINAIS)} atributos numéricos.")
+df_solo[["id_solo", "nome_solo"] + ESCALAS_ORDINAIS]
+
+# ---- célula 15 (código) -------------------------------------------
+# Preencher com o Mapa de Solos EMBRAPA/IBGE. Cada linha declara sua origem.
+#   fonte = "levantamento" -> conferido em fonte pedológica
+#   fonte = "regional"     -> generalização da região agrícola
+MAPA_CIDADE_SOLO = pd.DataFrame([
+    # --- RS: várzeas de arroz irrigado (Gleissolo), não Argissolo ---
+    {"UF": "RS", "Cidade": "URUGUAIANA",              "id_solo": 8, "fonte": "regional"},
+    {"UF": "RS", "Cidade": "SANTA VITORIA DO PALMAR", "id_solo": 8, "fonte": "regional"},
+    {"UF": "RS", "Cidade": "ALEGRETE",                "id_solo": 8, "fonte": "regional"},
+    # --- RS: planalto de grãos ---
+    {"UF": "RS", "Cidade": "PASSO FUNDO",             "id_solo": 1, "fonte": "regional"},
+    {"UF": "RS", "Cidade": "CRUZ ALTA",               "id_solo": 1, "fonte": "regional"},
+    # --- MT: Latossolo do Cerrado ---
+    {"UF": "MT", "Cidade": "SORRISO",                 "id_solo": 1, "fonte": "regional"},
+    {"UF": "MT", "Cidade": "CAMPO NOVO DOS PARECIS",  "id_solo": 1, "fonte": "regional"},
+    # --- PR / SP ---
+    {"UF": "PR", "Cidade": "CASCAVEL",                "id_solo": 1, "fonte": "regional"},
+    {"UF": "SP", "Cidade": "ITUVERAVA",               "id_solo": 1, "fonte": "regional"},
+])
+MAPA_CIDADE_SOLO["Cidade"] = MAPA_CIDADE_SOLO["Cidade"].map(limpar_nome_cidade)
+
+FALLBACK_UF = {"SP": 1, "PR": 1, "MT": 1, "RS": 3}
+
+
+def aplicar_solo(df_clima, mapa, fallback):
+    df = df_clima.copy()
+    df["Cidade"] = df["Cidade"].map(limpar_nome_cidade)
+    df = df.merge(mapa[["UF", "Cidade", "id_solo", "fonte"]], on=["UF", "Cidade"], how="left")
+
+    sem_mapa = df["id_solo"].isna()
+    df.loc[sem_mapa, "id_solo"] = df.loc[sem_mapa, "UF"].map(fallback)
+    df.loc[sem_mapa, "fonte"] = "fallback_uf"
+
+    orfaos = df["id_solo"].isna().sum()
+    if orfaos:
+        print(f"⚠️  {orfaos} linhas sem solo (UF fora do fallback).")
+
+    df["id_solo"] = df["id_solo"].astype("Int64")
+    return df
+
+
+df_com_solo = aplicar_solo(df_clima, MAPA_CIDADE_SOLO, FALLBACK_UF)
+
+# --------- relatório de cobertura (o merge não pode falhar calado) ---------
+cobertura = (df_com_solo.drop_duplicates("Cod_Estacao")
+             .groupby("fonte").size().rename("estacoes").reset_index())
+cobertura["%"] = (100 * cobertura["estacoes"] / cobertura["estacoes"].sum()).round(1)
+
+print("\nCOBERTURA DO MAPEAMENTO DE SOLO (por estação)")
+print(cobertura.to_string(index=False))
+pct_real = cobertura.loc[cobertura["fonte"] != "fallback_uf", "%"].sum()
+print(f"\n{pct_real:.1f}% das estações têm solo mapeado; o restante usa fallback por estado "
+      f"e precisa de validação agronômica.")
+
+# ---- célula 16 (código) -------------------------------------------
+# Merge final com a tabela de referência
+df_tcc = df_com_solo.merge(
+    df_solo.drop(columns=["descricao"]),   # descrição é texto longo, fica fora do modelo
+    on="id_solo", how="left",
+)
+
+# Ordenação amigável das colunas
+IDENT  = ["periodo", "periodo_label", "data_inicio", "data_fim",
+          "UF", "Cidade", "Cod_Estacao"]
+QUALID = ["dias_validos", "dias_no_periodo", "cobertura"]
+SOLO   = ["id_solo", "nome_solo", "ordem_solo", "textura", "fonte"] + \
+         ESCALAS_ORDINAIS + ["culturas_predominantes"]
+CLIMA  = [c for c in df_tcc.columns if c not in IDENT + QUALID + SOLO]
+
+df_tcc = df_tcc[IDENT + QUALID + CLIMA + SOLO]
+
+numericas = df_tcc.select_dtypes(include=[np.number]).columns
+df_tcc[numericas] = df_tcc[numericas].round(2)
+
+print(f"Base final: {df_tcc.shape[0]} linhas x {df_tcc.shape[1]} colunas")
+df_tcc.head()
+
+# ---- célula 17 (markdown) ----------------------------------------
+# ## 7. Validação da base
+# 
+# Rede de proteção: responde com número se a base pode ir para o modelo. Roda tudo sobre o
+# resultado final — não confia em nenhuma etapa anterior.
+
+# ---- célula 18 (código) -------------------------------------------
+def validar(df, granularidade=None):
+    granularidade = granularidade or GRANULARIDADE
+    print("=" * 64)
+    print(f"RELATÓRIO DE VALIDAÇÃO — base {granularidade.upper()}")
+    print("=" * 64)
+
+    print(f"\nLinhas: {len(df)} | Estações: {df['Cod_Estacao'].nunique()} "
+          f"| Períodos: {df['periodo'].nunique()}")
+    print(f"Intervalo: {df['periodo_label'].min()} a {df['periodo_label'].max()}")
+
+    # --- 1. duplicatas ---
+    dup = df.duplicated(subset=["Cod_Estacao", "periodo"]).sum()
+    print(f"\n[1] Duplicatas (estação+período): {dup}  {'OK' if dup == 0 else 'CORRIGIR'}")
+
+    # --- 2. integridade da semana ---
+    if granularidade == "semana":
+        span = (df["data_fim"] - df["data_inicio"]).dt.days + 1
+        quebradas = int((span > 7).sum())
+        print(f"[2] Semanas com mais de 7 dias: {quebradas}  "
+              f"{'OK' if quebradas == 0 else 'CORRIGIR'}")
+        # Semanas de virada de ano: devem existir e ter 7 dias
+        viradas = df[df["periodo"] % 100 == 1].groupby("periodo")["dias_no_periodo"].first()
+        print(f"    Semanas 01 presentes: {list(viradas.index)}")
+
+    # --- 3. completude ---
+    print("\n[3] Completude por coluna (piores 8):")
+    comp = (100 * df.notna().sum() / len(df)).sort_values()
+    for nome, pct in comp.head(8).items():
+        print(f"     {nome:26s} {pct:5.1f}%{'  <-- abaixo de 85%' if pct < 85 else ''}")
+
+    # --- 4. faixas físicas ---
+    print("\n[4] Faixas físicas:")
+    limite_chuva = 400 if granularidade == "semana" else 1500
+    checagens = {
+        "temp_media":            (-10, 45),
+        "umidade_media":         (0, 100),
+        "precipitacao_total_mm": (0, limite_chuva),
+        "vento_dir_predom":      (0, 360),
+        "pressao_media":         (800, 1060),
+    }
+    for col, (lo, hi) in checagens.items():
+        if col not in df.columns:
+            continue
+        fora = int(((df[col] < lo) | (df[col] > hi)).sum())
+        print(f"     {col:26s} fora de [{lo}, {hi}]: {fora}  "
+              f"{'OK' if fora == 0 else 'VERIFICAR'}")
+
+    # --- 5. coerência interna ---
+    print("\n[5] Coerência interna:")
+    inc_t = int((df["temp_max_abs"] < df["temp_min_abs"]).sum())
+    print(f"     temp_max_abs < temp_min_abs: {inc_t}  {'OK' if inc_t == 0 else 'CORRIGIR'}")
+    inc_d = int((df["dias_com_chuva"] > df["dias_no_periodo"]).sum())
+    print(f"     dias_com_chuva > dias_no_periodo: {inc_d}  {'OK' if inc_d == 0 else 'CORRIGIR'}")
+    inc_v = int((df["maior_veranico"] > df["dias_no_periodo"]).sum())
+    print(f"     maior_veranico > dias_no_periodo: {inc_v}  {'OK' if inc_v == 0 else 'CORRIGIR'}")
+
+    # --- 6. direção do vento: o teste que denuncia média aritmética ---
+    d = df["vento_dir_predom"].dropna()
+    if len(d):
+        pct_meio = 100 * ((d >= 135) & (d <= 225)).mean()
+        print(f"\n[6] Direção do vento entre 135° e 225°: {pct_meio:.0f}%")
+        print("     (acima de ~60% indica média aritmética em variável circular)")
+
+    # --- 7. colinearidade ---
+    num = df.select_dtypes(include=[np.number]).drop(
+        columns=["periodo", "id_solo", "dias_no_periodo"], errors="ignore")
+    corr = num.corr().abs()
+    altos = [(corr.columns[i], corr.columns[j], corr.iloc[i, j])
+             for i in range(len(corr)) for j in range(i + 1, len(corr))
+             if corr.iloc[i, j] > 0.90]
+    print(f"\n[7] Pares com |r| > 0,90: {len(altos)}")
+    for a, b, v in sorted(altos, key=lambda t: -t[2])[:8]:
+        print(f"     {a} x {b}: {v:.3f}")
+
+    # --- 8. solo ---
+    print(f"\n[8] Classes de solo em uso: {df['nome_solo'].nunique()}")
+    print(df.drop_duplicates("Cod_Estacao")["fonte"].value_counts().to_string())
+    print("\n" + "=" * 64)
+
+
+validar(df_tcc)
+
+# ---- célula 19 (markdown) ----------------------------------------
+# ## 8. Exportação
+
+# ---- célula 20 (código) -------------------------------------------
+DICIONARIO = {
+    "periodo": "Chave do período: AAAASS (semana ISO) ou AAAAMM (mês)",
+    "periodo_label": "Rótulo legível: 2023-W07 ou 2023-07",
+    "data_inicio": "Primeiro dia com medição no período",
+    "data_fim": "Último dia com medição no período",
+    "UF": "Unidade federativa da estação",
+    "Cidade": "Município da estação (nome normalizado)",
+    "Cod_Estacao": "Código da estação automática do INMET",
+    "dias_validos": "Dias do período com pelo menos 18 h de medição",
+    "dias_no_periodo": "Total de dias do período (7 na base semanal)",
+    "cobertura": "dias_validos / dias_no_periodo",
+    "temp_media": "Temperatura média do ar (°C)",
+    "temp_max_media": "Média das máximas diárias (°C)",
+    "temp_min_media": "Média das mínimas diárias (°C)",
+    "temp_max_abs": "Maior temperatura registrada no período (°C)",
+    "temp_min_abs": "Menor temperatura registrada no período (°C)",
+    "amplitude_termica": "Média diária de (máxima - mínima) (°C)",
+    "graus_dia_acum": f"Graus-dia acumulados, base {TEMP_BASE_GDD} °C",
+    "precipitacao_total_mm": "Chuva acumulada no período (mm)",
+    "dias_com_chuva": f"Dias com chuva >= {LIMIAR_DIA_CHUVOSO_MM} mm",
+    "maior_veranico": "Maior sequência de dias secos DENTRO do período",
+    "dias_secos_acumulados": "Dias secos consecutivos até o fim do período, "
+                             "contados atravessando períodos anteriores",
+    "umidade_media": "Umidade relativa média (%)",
+    "umidade_min_abs": "Menor umidade relativa do período (%)",
+    "vpd_medio_kpa": "Déficit de pressão de vapor médio (kPa)",
+    "vpd_max_kpa": "Maior VPD HORÁRIO do período (kPa) — pico real de demanda hídrica",
+    "orvalho_medio": "Temperatura média do ponto de orvalho (°C)",
+    "radiacao_total_mjm2": "Radiação global acumulada no período (MJ/m²)",
+    "pressao_media": "Pressão atmosférica média na estação (mB)",
+    "vento_medio": "Velocidade média do vento (m/s)",
+    "vento_rajada_max": "Maior rajada registrada no período (m/s)",
+    "vento_dir_predom": "Direção predominante do vento (°, média vetorial)",
+    "vento_dir_consistencia": "0 = vento gira; 1 = direção constante",
+    "id_solo": "Chave da classe de solo",
+    "nome_solo": "Classe de solo (SiBCS)",
+    "ordem_solo": "Ordem pedológica",
+    "textura": "Classe textural",
+    "fonte": "Origem do solo: regional, levantamento ou fallback_uf",
+    "retencao_agua": "Capacidade de retenção hídrica (1-5)",
+    "drenagem": "Capacidade de drenagem (1-5)",
+    "aptidao_graos": "Aptidão para grãos (1-5)",
+    "profundidade": "Profundidade efetiva (1-5)",
+    "risco_erosao": "Suscetibilidade à erosão (1-5)",
+    "culturas_predominantes": "Culturas típicas da classe de solo",
+}
+
+df_dicionario = pd.DataFrame(
+    [{"coluna": k, "descricao": v, "presente": k in df_tcc.columns}
+     for k, v in DICIONARIO.items()])
+
+with pd.ExcelWriter(SAIDA_XLSX, engine="openpyxl") as writer:
+    df_tcc.to_excel(writer, sheet_name="dados", index=False)
+    df_dicionario.to_excel(writer, sheet_name="dicionario", index=False)
+    df_solo.to_excel(writer, sheet_name="ref_solos", index=False)
+
+print(f"Salvo: {SAIDA_XLSX}")
+print(f"{df_tcc.shape[0]} linhas x {df_tcc.shape[1]} colunas | 3 abas: dados, dicionario, ref_solos")
+
+# ---- célula 21 (markdown) ----------------------------------------
+# ## 9. O que muda no modelo com base semanal
+# 
+# **A janela de agregação passa a ser sua.** Com dados semanais você escolhe a janela em vez de
+# herdá-la do calendário. Para soja em MT, somar as semanas de outubro a fevereiro reproduz o
+# ciclo; melhor ainda é separar por estádio — vegetativo, floração, enchimento de grão — porque
+# seca na floração custa muito mais que seca no vegetativo, e o coeficiente do Elastic Net
+# consegue mostrar isso.
+# 
+# **A validação cruzada precisa respeitar o tempo.** Semanas vizinhas da mesma estação são
+# altamente correlacionadas. Um `KFold` embaralhado colocaria a semana 11 no treino e a 12 no
+# teste, e o modelo pareceria excelente por motivo errado. Use `GroupKFold` agrupando por
+# estação, ou `TimeSeriesSplit` se o corte for temporal.
+# 
+# **A variável-alvo continua faltando.** Produtividade em sacas/ha vem por município e safra
+# (PAM/IBGE ou CONAB) — anual, não semanal. O caminho é agregar as semanas dentro da janela do
+# ciclo e cruzar com o alvo por `Cidade` + `UF` + ano-safra.
+# 
+# **O que ainda vale lembrar:** ajuste o Min-Max dentro de cada fold, nunca sobre a base inteira
+# antes de dividir; e use `cobertura` como filtro de linha, não como preditor.

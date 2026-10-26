@@ -1,0 +1,770 @@
+# ==========================================================================
+# NOTEBOOK: modelagem_exante_expost.ipynb
+# células: 30
+# ==========================================================================
+
+
+# ---- célula 0 (markdown) ----------------------------------------
+# # Modelagem — projetado × realizado
+# 
+# Treina a Calculadora Agrícola e produz a **base de variações**: para cada município, cultura e
+# safra, o que foi projetado, o que foi realizado, e a diferença entre os dois.
+# 
+# ---
+# 
+# ## Desenho do experimento
+# 
+# | Papel | O que é | Fonte | Granularidade |
+# |---|---|---|---|
+# | **X** | clima + solo | INMET (semanal) + SiBCS | agregado por estádio do ciclo |
+# | **Ex-ante — modelo** | previsão do Elastic Net | **este notebook** | por momento de corte |
+# | **Ex-ante — referência** | estimativa da CONAB | levantamentos 1–12 | UF × safra × levantamento |
+# | **Ex-post** | rendimento realizado | PAM/IBGE | município × safra |
+# | **Variações** | projetado − realizado | cruzamento | por momento |
+# 
+# A previsão é **ex-ante de verdade**: em cada momento de corte, o modelo enxerga apenas o clima
+# que já tinha acontecido até ali. Prever o enchimento de grão usando dados do enchimento de
+# grão seria descrever o passado, não prever.
+# 
+# ## Três momentos de corte
+# 
+# | Momento | Clima disponível | Situação real no campo |
+# |---|---|---|
+# | **M1 — vegetativo** | ~45% do ciclo | lavoura ainda crescendo; decisão de logística começa aqui |
+# | **M2 — floração** | ~70% do ciclo | potencial produtivo praticamente definido |
+# | **M3 — ciclo completo** | 100% | pré-colheita; melhor previsão possível |
+# 
+# Se o erro cair de M1 para M3, o modelo está aprendendo com o clima e não com ruído — e a
+# curva de convergência é o gráfico mais forte da defesa.
+# 
+# ## O que responde à hipótese H1 do TCC
+# 
+# O título do trabalho é *Análise Comparativa entre Modelos Tradicionais e Algoritmos de Machine
+# Learning*. Comparar Elastic Net com Árvore e Random Forest não responde isso — os três são ML.
+# O termo de comparação tem que ser o **método tradicional**, que na estimativa de safra é a
+# média histórica. Por isso entram aqui dois baselines:
+# 
+# - **média histórica do município** — o que se estimaria sem olhar o clima
+# - **média da UF na safra** — referência regional
+# 
+# Se o Elastic Net não superar a média histórica, a conclusão honesta é que o clima, nesta
+# configuração, não acrescentou informação. Melhor descobrir agora que na defesa.
+# 
+# ## Cuidados de validação
+# 
+# **`GroupKFold` por município.** Duas safras do mesmo município compartilham solo, altitude e
+# manejo. Um `KFold` embaralhado deixaria o município no treino e no teste ao mesmo tempo e o R²
+# sairia inflado por memorização geográfica.
+# 
+# **Busca de hiperparâmetros aninhada.** O grid roda *dentro* de cada fold de treino. Escolher
+# alpha e l1_ratio olhando o conjunto inteiro e depois reportar o resultado desse mesmo conjunto
+# é vazamento clássico.
+# 
+# **Escalonamento dentro do pipeline.** O Min-Max é ajustado só no treino de cada fold. Ajustar
+# antes de dividir vaza a distribuição do teste.
+
+# ---- célula 1 (markdown) ----------------------------------------
+# ## 1. Configuração
+
+# ---- célula 2 (código) -------------------------------------------
+import warnings
+import numpy as np
+import pandas as pd
+
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import MinMaxScaler
+from sklearn.linear_model import ElasticNet
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import GroupKFold, GridSearchCV, cross_val_predict
+from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
+
+warnings.filterwarnings("ignore")
+
+ARQUIVO_MODELO = "df_tcc_modelo.xlsx"    # saída do notebook do alvo
+ARQUIVO_CONAB  = "conab_levantamentos.xlsx"   # opcional: ex-ante da CONAB
+
+# Cobertura mínima do ciclo para a linha entrar no treino.
+MIN_COBERTURA_CICLO = 0.80
+
+# Folds da validação cruzada.
+N_FOLDS = 5
+
+# Dois esquemas, que respondem a perguntas diferentes:
+#   "espacial" -> GroupKFold por município: funciona onde NAO tenho histórico?
+#   "temporal" -> treina em safras passadas, testa na seguinte: prevejo a
+#                 próxima safra de um município que já conheço?
+ESQUEMAS = ["espacial", "temporal"]
+
+# Dar ao modelo a média histórica do município como variável.
+# Sem isso a comparação é injusta: o baseline usa o histórico do município
+# e o modelo não pode nem enxergá-lo.
+INCLUIR_MEDIA_HISTORICA = True
+
+SEMENTE = 42
+
+SAIDA = "resultados_modelagem.xlsx"
+
+print(f"Entrada: {ARQUIVO_MODELO}")
+print(f"Folds: {N_FOLDS} (GroupKFold por município) | semente: {SEMENTE}")
+
+# ---- célula 3 (markdown) ----------------------------------------
+# ## 2. Carregar e filtrar
+# 
+# Duas exclusões antes de treinar, ambas declaráveis à banca: ciclos com poucas semanas medidas
+# não descrevem a safra, e rendimentos fora da faixa fisicamente plausível são erro de registro,
+# não safra ruim.
+
+# ---- célula 4 (código) -------------------------------------------
+df = pd.read_excel(ARQUIVO_MODELO, sheet_name="modelo")
+print(f"Bruto: {len(df)} linhas")
+
+# --- filtro 1: cobertura do ciclo ---
+antes = len(df)
+df = df[df["cobertura_ciclo"] >= MIN_COBERTURA_CICLO].copy()
+print(f"  cobertura >= {MIN_COBERTURA_CICLO:.0%}: -{antes - len(df)} linhas")
+
+# --- filtro 2: rendimento plausível ---
+FAIXAS_SACAS = {
+    "Soja (em grão)":  (15, 100),
+    "Milho (em grão)": (20, 250),
+    "Trigo (em grão)": (10, 100),
+}
+antes = len(df)
+mascara = pd.Series(False, index=df.index)
+for cultura, (lo, hi) in FAIXAS_SACAS.items():
+    mascara |= ((df["cultura_tcc"] == cultura) &
+                df["rendimento_sacas_ha"].between(lo, hi))
+df = df[mascara].copy()
+print(f"  rendimento plausível: -{antes - len(df)} linhas")
+
+print(f"\nRestam {len(df)} linhas | {df['cod_municipio'].nunique()} municípios "
+      f"| safras {sorted(df['ano_pam'].unique())}")
+print("\nPor cultura:")
+print(df["cultura_tcc"].value_counts().to_string())
+
+# ---- célula 5 (markdown) ----------------------------------------
+# ### 2b. Guarda de sanidade — zeros impossíveis
+# 
+# Para a banca: esta célula falha de propósito se a base de entrada tiver
+# zeros fabricados por dado faltante. Era o defeito que inflava os resultados
+# da primeira rodada.
+
+# ---- célula 6 (código) -------------------------------------------
+# --- Guarda de sanidade da base de entrada -----------------------------------
+# Graus-dia acumulados = 0 numa floração, ou radiação solar total = 0 ao longo
+# de um enchimento de grãos, são fisicamente impossíveis. Quando aparecem, é
+# soma de série toda-NaN devolvendo 0.0 lá no notebook do alvo. O modelo lê
+# isso como seca extrema e aprende falha de sensor.
+
+impossivel_zero = [c for c in df.columns
+                   if c.endswith(("graus_dia_acum", "radiacao_total_mjm2"))
+                   and not c.startswith("ciclo_")]
+com_zero = (df[impossivel_zero] == 0).any(axis=1)
+
+print(f"Colunas que não podem ser zero: {len(impossivel_zero)}")
+print(f"Linhas com ao menos um zero impossível: {int(com_zero.sum())} de {len(df)}")
+
+if com_zero.any():
+    print("\nPor safra (concentração nas safras de quebra é o sinal de alerta):")
+    print(df[com_zero].groupby("ano_pam").size().to_string())
+    raise AssertionError(
+        f"{int(com_zero.sum())} linhas com zero impossível. Reexecute o notebook "
+        "do alvo com agregar_coluna() (min_count=1) antes de treinar."
+    )
+
+print("\nOK: nenhum zero fabricado na base.")
+
+if "semanas_validas" in df.columns:
+    real = (df["semanas_validas"] / df["semanas_esperadas"])
+    print(f"Cobertura real do ciclo: média {real.mean():.1%}, "
+          f"mínima {real.min():.1%}")
+
+# ---- célula 7 (markdown) ----------------------------------------
+# ## 3. Montagem dos momentos de corte
+# 
+# É aqui que a previsão vira ex-ante. Cada momento só recebe as colunas dos estádios já
+# ocorridos até aquele ponto do ciclo. As variáveis de solo entram sempre — solo não muda ao
+# longo da safra.
+
+# ---- célula 8 (código) -------------------------------------------
+COLUNAS_SOLO = ["retencao_agua", "drenagem", "aptidao_graos", "profundidade", "risco_erosao"]
+
+MOMENTOS = {
+    "M1_vegetativo": ["vegetativo_"],
+    "M2_floracao":   ["vegetativo_", "floracao_"],
+    "M3_completo":   ["vegetativo_", "floracao_", "enchimento_"],
+}
+
+
+def montar_X(df, prefixos, incluir_historico=None):
+    """Colunas climáticas dos estádios permitidos + solo (+ média histórica)."""
+    if incluir_historico is None:
+        incluir_historico = INCLUIR_MEDIA_HISTORICA
+    clima = [c for c in df.columns
+             if any(c.startswith(p) for p in prefixos)]
+    solo = [c for c in COLUNAS_SOLO if c in df.columns]
+    extra = ["base_media_historica"] if (
+        incluir_historico and "base_media_historica" in df.columns) else []
+    return clima + solo + extra
+
+
+for nome, prefixos in MOMENTOS.items():
+    cols = montar_X(df, prefixos, incluir_historico=False)
+    print(f"{nome:16s} {len(cols):3d} variáveis climáticas + solo")
+print()
+print("(+1 se INCLUIR_MEDIA_HISTORICA: a média entra como variável e o "
+      "modelo precisa superá-la a partir do clima)")
+
+# Sanidade: M3 deve conter M1; nenhum momento pode conter estádio futuro.
+assert set(montar_X(df, MOMENTOS["M1_vegetativo"], False)) <= \
+       set(montar_X(df, MOMENTOS["M3_completo"], False))
+assert not any("enchimento_" in c for c in montar_X(df, MOMENTOS["M1_vegetativo"], False)), \
+    "vazamento: M1 não pode ver o enchimento"
+print("\nOK: nenhum momento enxerga estádio futuro.")
+
+# ---- célula 9 (markdown) ----------------------------------------
+# ## 4. Métodos tradicionais (os baselines)
+# 
+# O que um técnico estimaria **sem** olhar o clima da safra. É contra isto que o machine learning
+# precisa provar valor.
+# 
+# A média histórica é calculada **excluindo a própria safra** que está sendo prevista — usar o
+# valor que se quer prever para construir a previsão inflaria o baseline artificialmente.
+
+# ---- célula 10 (código) -------------------------------------------
+# A média histórica tem DOIS papéis aqui: é o "método tradicional" contra o
+# qual H1 é testada, e é variável do modelo (INCLUIR_MEDIA_HISTORICA). Por isso
+# ela precisa ser estritamente ex-ante: um leave-one-out sobre todas as safras
+# usa 2023 e 2024 para prever 2022, o que dá ao método tradicional uma vantagem
+# impossível e contamina o X do modelo no esquema temporal.
+#
+# Média EXPANSIVA: para cada linha, só as safras ANTERIORES do mesmo município
+# e cultura. A primeira safra do município cai para a média da UF nas safras
+# anteriores; na falta dessa, para a média geral do histórico disponível.
+
+df = df.sort_values(["cod_municipio", "cultura_tcc", "ano_pam"]).reset_index(drop=True)
+
+
+def baseline_media_historica(df):
+    """Média das safras ANTERIORES do mesmo município e cultura (expansiva)."""
+    grupo = df.groupby(["cod_municipio", "cultura_tcc"])["rendimento_sacas_ha"]
+    expansiva = (grupo.apply(lambda s: s.shift().expanding().mean())
+                      .reset_index(level=[0, 1], drop=True))
+    # fallback 1: média da UF+cultura nas safras anteriores
+    uf_anterior = (df.sort_values("ano_pam")
+                     .groupby(["UF", "cultura_tcc"])["rendimento_sacas_ha"]
+                     .apply(lambda s: s.shift().expanding().mean())
+                     .reset_index(level=[0, 1], drop=True))
+    return expansiva.fillna(uf_anterior).fillna(df["rendimento_sacas_ha"].mean())
+
+
+def baseline_media_uf(df):
+    """Média da UF e cultura nas safras ANTERIORES.
+
+    A versão anterior usava a média da PRÓPRIA safra de teste, que não é
+    conhecível ex-ante: ninguém sabe a média do estado antes da colheita.
+    """
+    anterior = (df.sort_values("ano_pam")
+                  .groupby(["UF", "cultura_tcc"])["rendimento_sacas_ha"]
+                  .apply(lambda s: s.shift().expanding().mean())
+                  .reset_index(level=[0, 1], drop=True))
+    return anterior.fillna(df["rendimento_sacas_ha"].mean())
+
+
+def baseline_media_indexada(df):
+    """Média histórica do município corrigida pelo FATOR DO ANO na região.
+
+    É o método tradicional bem especificado — o que uma cooperativa de fato
+    faz: pega a média do município e escala pelo andamento da safra no estado.
+
+    Por que importa: no esquema espacial o modelo treina com OUTROS municípios
+    da mesma safra, então ele sabe que 2022 foi ruim. A média histórica pura
+    não sabe — ela só conhece o passado daquele lugar. Comparar o modelo contra
+    ela é comparar conjuntos de informação diferentes, e infla o ganho.
+
+    O fator do ano é estimado leave-one-out nos demais municípios da mesma UF e
+    cultura, para que a própria linha não entre no seu comparador.
+    """
+    chave = ["UF", "cultura_tcc", "ano_pam"]
+    soma_real = df.groupby(chave)["rendimento_sacas_ha"].transform("sum")
+    soma_hist = df.groupby(chave)["base_media_historica"].transform("sum")
+    fator = ((soma_real - df["rendimento_sacas_ha"]) /
+             (soma_hist - df["base_media_historica"]).replace(0, np.nan))
+    return (df["base_media_historica"] * fator.fillna(1.0)).fillna(df["base_media_historica"])
+
+
+df["base_media_historica"] = baseline_media_historica(df)
+df["base_media_uf"] = baseline_media_uf(df)
+df["base_media_indexada"] = baseline_media_indexada(df)
+
+print("Baselines calculados (expansivos: só safras anteriores).")
+print(df[["rendimento_sacas_ha", "base_media_historica", "base_media_uf",
+          "base_media_indexada"]].describe().round(2).to_string())
+
+# Prova de que não há olhada no futuro: a primeira safra de cada município não
+# pode ter média própria, e a correlação com safras futuras tem que ser a de
+# uma média de passado, nunca 1.
+primeira = df.groupby(["cod_municipio", "cultura_tcc"])["ano_pam"].transform("min")
+sem_passado = int((df["ano_pam"] == primeira).sum())
+print(f"\nLinhas sem safra anterior (usam fallback de UF): {sem_passado}")
+
+# ---- célula 11 (markdown) ----------------------------------------
+# ## 5. Modelos e grade de hiperparâmetros
+# 
+# Os três algoritmos que o TCC compara. A grade do Elastic Net varre desde quase-Ridge
+# (`l1_ratio` baixo) até quase-Lasso (`l1_ratio` alto), deixando os dados escolherem — em vez de
+# fixar o parâmetro por conveniência.
+
+# ---- célula 12 (código) -------------------------------------------
+def construir_modelos(semente=SEMENTE):
+    return {
+        "elastic_net": (
+            Pipeline([("escala", MinMaxScaler()),
+                      ("modelo", ElasticNet(max_iter=20000, random_state=semente))]),
+            {"modelo__alpha":    [0.001, 0.01, 0.1, 0.5, 1.0, 5.0],
+             "modelo__l1_ratio": [0.1, 0.3, 0.5, 0.7, 0.9, 0.95]},
+        ),
+        "arvore": (
+            Pipeline([("modelo", DecisionTreeRegressor(random_state=semente))]),
+            {"modelo__max_depth":         [3, 5, 8, 12, None],
+             "modelo__min_samples_leaf":  [1, 5, 10, 20]},
+        ),
+        "random_forest": (
+            Pipeline([("modelo", RandomForestRegressor(
+                n_estimators=300, random_state=semente, n_jobs=-1))]),
+            {"modelo__max_depth":        [8, 15, None],
+             "modelo__min_samples_leaf": [1, 5, 10]},
+        ),
+    }
+
+
+def metricas(y_real, y_prev):
+    return {
+        "RMSE": float(np.sqrt(mean_squared_error(y_real, y_prev))),
+        "MAE":  float(mean_absolute_error(y_real, y_prev)),
+        "R2":   float(r2_score(y_real, y_prev)),
+    }
+
+
+print("3 modelos configurados.")
+for nome, (_, grade) in construir_modelos().items():
+    n_combos = np.prod([len(v) for v in grade.values()])
+    print(f"  {nome:14s} {n_combos:3.0f} combinações na grade")
+
+# ---- célula 13 (markdown) ----------------------------------------
+# ## 6. Treino com validação cruzada aninhada
+# 
+# Dois esquemas, porque respondem a perguntas diferentes — e a banca pode perguntar as duas.
+# 
+# **Espacial (`GroupKFold` por município).** Treina em uns municípios, testa em outros. Responde:
+# *o modelo funciona onde eu não tenho histórico?* É o teste mais duro, e o mais relevante para
+# expandir a calculadora para áreas novas.
+# 
+# **Temporal (por safra).** Treina nas safras passadas, testa na seguinte. Responde: *consigo
+# prever a próxima safra de um município que já conheço?* É o caso de uso real do produtor.
+# 
+# **Um cuidado que muda o resultado.** O baseline "média histórica" usa o histórico do próprio
+# município. No esquema espacial, o modelo nunca viu aquele município — então comparar os dois
+# sem mais nada é injusto com o modelo. Por isso `INCLUIR_MEDIA_HISTORICA = True` entrega a média
+# como variável: os dois passam a partir do mesmo ponto, e o que se mede é **quanto o clima
+# acrescenta sobre a média**. É essa a pergunta do TCC.
+# 
+# O laço de validação é explícito de propósito: é a única forma limpa de garantir que a busca de
+# hiperparâmetros interna também respeite o agrupamento, sem depender do roteamento de metadados
+# do scikit-learn, que muda entre versões.
+
+# ---- célula 14 (código) -------------------------------------------
+def particoes(df, esquema, n_folds=N_FOLDS):
+    """Gera (treino_idx, teste_idx) conforme o esquema escolhido."""
+    idx = np.arange(len(df))
+
+    if esquema == "espacial":
+        grupos = df["cod_municipio"].values
+        cv = GroupKFold(n_splits=min(n_folds, len(np.unique(grupos))))
+        for tr, te in cv.split(idx, groups=grupos):
+            yield tr, te, grupos
+
+    elif esquema == "temporal":
+        # cada safra a partir da segunda vira um teste; treino = safras anteriores
+        safras = np.sort(df["ano_pam"].unique())
+        for safra in safras[1:]:
+            tr = idx[df["ano_pam"].values < safra]
+            te = idx[df["ano_pam"].values == safra]
+            if len(tr) < 50 or len(te) == 0:
+                continue
+            yield tr, te, df["cod_municipio"].values
+
+    else:
+        raise ValueError(f"esquema desconhecido: {esquema}")
+
+
+def avaliar(df, colunas_X, esquema, y_col="rendimento_sacas_ha", n_folds=N_FOLDS):
+    """Roda os 3 modelos e devolve previsões fora da amostra."""
+    X = df[colunas_X].copy()
+    # A imputação é parte do modelo: a mediana sai SÓ do fold de treino.
+    # Calcular sobre o df inteiro deixa a mediana do teste entrar no treino.
+    y = df[y_col].values
+
+    previsoes, melhores = {}, {}
+
+    for nome, (pipe, grade) in construir_modelos().items():
+        prev = np.full(len(y), np.nan)
+
+        for treino_idx, teste_idx, grupos in particoes(df, esquema, n_folds):
+            mediana = X.iloc[treino_idx].median(numeric_only=True)
+            X_tr = X.iloc[treino_idx].fillna(mediana)
+            X_te = X.iloc[teste_idx].fillna(mediana)
+            y_tr = y[treino_idx]
+            g_tr = grupos[treino_idx]
+
+            n_grupos_tr = len(np.unique(g_tr))
+            busca = GridSearchCV(
+                pipe, grade,
+                cv=GroupKFold(n_splits=max(2, min(n_folds - 1, n_grupos_tr))),
+                scoring="neg_root_mean_squared_error",
+                n_jobs=-1,
+            )
+            busca.fit(X_tr, y_tr, groups=g_tr)
+            prev[teste_idx] = busca.predict(X_te)
+
+        previsoes[nome] = prev
+        melhores[nome] = busca.best_params_   # do último fold, como referência
+
+    return previsoes, melhores
+
+
+resultados = {}          # (esquema, momento) -> {modelo: previsoes}
+hiperparametros = {}
+avaliadas = {}           # (esquema, momento) -> máscara de linhas com previsão
+
+for esquema in ESQUEMAS:
+    for momento, prefixos in MOMENTOS.items():
+        colunas = montar_X(df, prefixos)
+        chave = (esquema, momento)
+
+        prev, best = avaliar(df, colunas, esquema)
+        resultados[chave] = prev
+        hiperparametros[chave] = best
+
+        # no esquema temporal a primeira safra nunca é testada
+        mascara = ~np.isnan(list(prev.values())[0])
+        avaliadas[chave] = mascara
+
+        print(f"\n{esquema.upper():9s} | {momento:14s} | "
+              f"{len(colunas):3d} vars | {int(mascara.sum())} linhas testadas")
+        for nome, pr in prev.items():
+            m = metricas(df["rendimento_sacas_ha"][mascara], pr[mascara])
+            print(f"    {nome:14s} RMSE {m['RMSE']:6.2f}  "
+                  f"MAE {m['MAE']:6.2f}  R2 {m['R2']:6.3f}")
+        for nome, bl in [("media_historica", "base_media_historica"),
+                         ("media_indexada", "base_media_indexada"),
+                         ("media_uf", "base_media_uf")]:
+            m = metricas(df["rendimento_sacas_ha"][mascara], df[bl][mascara])
+            print(f"    [base] {nome:8s} RMSE {m['RMSE']:6.2f}  "
+                  f"MAE {m['MAE']:6.2f}  R2 {m['R2']:6.3f}")
+
+# ---- célula 15 (markdown) ----------------------------------------
+# ## 7. Base de variações — projetado × realizado
+# 
+# A tabela que você pediu: uma linha por município, cultura, safra, momento e origem da
+# projeção, com o previsto, o realizado e a diferença entre os dois.
+# 
+# Formato longo (*tidy*) de propósito — é o que permite filtrar por momento, comparar origens
+# lado a lado e plotar a convergência sem remodelar nada.
+
+# ---- célula 16 (código) -------------------------------------------
+linhas = []
+IDENT = ["cod_municipio", "municipio_ibge", "UF", "cultura_tcc", "ano_pam"]
+
+for (esquema, momento), previsoes in resultados.items():
+    mascara = avaliadas[(esquema, momento)]
+    for modelo, prev in previsoes.items():
+        bloco = df.loc[mascara, IDENT].copy()
+        bloco["esquema"] = esquema
+        bloco["momento"] = momento
+        bloco["origem"] = modelo
+        bloco["tipo"] = "modelo"
+        bloco["projetado"] = prev[mascara]
+        linhas.append(bloco)
+
+# baselines: replicados por esquema, sobre as mesmas linhas testadas,
+# para a comparação ser feita exatamente no mesmo conjunto
+for esquema in ESQUEMAS:
+    mascara = avaliadas[(esquema, list(MOMENTOS)[0])]
+    for modelo, coluna in [("media_historica", "base_media_historica"),
+                           ("media_uf", "base_media_uf")]:
+        bloco = df.loc[mascara, IDENT].copy()
+        bloco["esquema"] = esquema
+        bloco["momento"] = "tradicional"
+        bloco["origem"] = modelo
+        bloco["tipo"] = "tradicional"
+        bloco["projetado"] = df.loc[mascara, coluna].values
+        linhas.append(bloco)
+
+variacoes = pd.concat(linhas, ignore_index=True)
+
+variacoes = variacoes.merge(
+    df[IDENT + ["rendimento_sacas_ha"]].rename(
+        columns={"rendimento_sacas_ha": "realizado"}),
+    on=IDENT, how="left")
+
+# --- as variações ---
+variacoes["erro"] = (variacoes["projetado"] - variacoes["realizado"]).round(3)
+variacoes["erro_abs"] = variacoes["erro"].abs().round(3)
+variacoes["erro_pct"] = (100 * variacoes["erro"] / variacoes["realizado"]).round(2)
+variacoes["superestimou"] = variacoes["erro"] > 0
+variacoes["projetado"] = variacoes["projetado"].round(2)
+
+print(f"Base de variações: {len(variacoes)} linhas")
+print(f"  {variacoes['esquema'].nunique()} esquemas x "
+      f"{variacoes['origem'].nunique()} origens x "
+      f"{variacoes['momento'].nunique()} momentos")
+print("\nAmostra:")
+print(variacoes.head(8)[
+    ["municipio_ibge", "cultura_tcc", "ano_pam", "esquema", "momento",
+     "origem", "projetado", "realizado", "erro", "erro_pct"]].to_string(index=False))
+
+# ---- célula 17 (markdown) ----------------------------------------
+# ## 8. Convergência do erro e o teste da hipótese H1
+# 
+# O quadro que resume a defesa. Leia por esquema: dentro de cada um, o modelo e os métodos
+# tradicionais foram avaliados exatamente sobre as mesmas linhas.
+
+# ---- célula 18 (código) -------------------------------------------
+resumo = []
+for esquema in variacoes["esquema"].unique():
+    sub_e = variacoes[variacoes["esquema"] == esquema]
+    for momento in sub_e["momento"].unique():
+        sub = sub_e[sub_e["momento"] == momento]
+        for origem in sub["origem"].unique():
+            s_ = sub[sub["origem"] == origem]
+            resumo.append({
+                "esquema": esquema,
+                "momento": momento,
+                "origem": origem,
+                "tipo": s_["tipo"].iloc[0],
+                "RMSE": round(float(np.sqrt((s_["erro"] ** 2).mean())), 2),
+                "MAE": round(float(s_["erro_abs"].mean()), 2),
+                "R2": round(float(r2_score(s_["realizado"], s_["projetado"])), 3),
+                "vies": round(float(s_["erro"].mean()), 2),
+                "erro_pct_medio": round(float(s_["erro_pct"].abs().mean()), 1),
+                "n": len(s_),
+            })
+
+df_resumo = pd.DataFrame(resumo).sort_values(["esquema", "momento", "RMSE"])
+
+print("=" * 80)
+print("DESEMPENHO POR ESQUEMA, MOMENTO E ORIGEM")
+print("=" * 80)
+print(df_resumo.to_string(index=False))
+
+print("\n" + "=" * 80)
+print("H1: MACHINE LEARNING SUPERA O MÉTODO TRADICIONAL?")
+print("=" * 80)
+
+for esquema in df_resumo["esquema"].unique():
+    sub_e = df_resumo[df_resumo["esquema"] == esquema]
+    trad = sub_e[sub_e["tipo"] == "tradicional"]
+    if trad.empty:
+        continue
+    linha_trad = trad.loc[trad["RMSE"].idxmin()]
+    print(f"\n--- esquema {esquema.upper()} ---")
+    print(f"  melhor tradicional: {linha_trad['origem']} "
+          f"(RMSE {linha_trad['RMSE']:.2f} sacas/ha)")
+
+    for momento in MOMENTOS:
+        sub = sub_e[(sub_e["momento"] == momento) & (sub_e["tipo"] == "modelo")]
+        if sub.empty:
+            continue
+        melhor = sub.loc[sub["RMSE"].idxmin()]
+        ganho = 100 * (linha_trad["RMSE"] - melhor["RMSE"]) / linha_trad["RMSE"]
+        veredito = "supera" if ganho > 0 else "NAO supera"
+        print(f"    {momento:16s} {melhor['origem']:14s} "
+              f"RMSE {melhor['RMSE']:6.2f}  ->  {veredito} em {ganho:+.1f}%")
+
+print("\nGanho negativo significa que, naquela configuração, o clima não")
+print("acrescentou informação sobre a média histórica. É um resultado válido")
+print("e deve ser reportado como tal.")
+
+# ---- célula 19 (markdown) ----------------------------------------
+# ### 8b. O clima sozinho — o limite honesto
+# 
+# Separa o mérito do clima do mérito da média histórica. É a seção de
+# limitações que a banca vai cobrar.
+
+# ---- célula 20 (código) -------------------------------------------
+# --- Quanto do acerto vem do CLIMA e quanto vem da média histórica? ----------
+# A média histórica entra como variável do modelo (INCLUIR_MEDIA_HISTORICA).
+# Isso é defensável — iguala a informação do modelo e a do método tradicional —
+# mas significa que o R² alto NÃO é mérito do clima. Rodar sem ela mede o que o
+# clima sozinho consegue, e é o número honesto para a seção de limitações.
+
+comparacao = []
+for esquema in ESQUEMAS:
+    colunas_com  = montar_X(df, MOMENTOS["M3_completo"], incluir_historico=True)
+    colunas_sem  = montar_X(df, MOMENTOS["M3_completo"], incluir_historico=False)
+
+    for rotulo, colunas in [("clima + solo + média", colunas_com),
+                            ("só clima + solo",      colunas_sem)]:
+        prev, _ = avaliar(df, colunas, esquema)
+        mascara = ~np.isnan(list(prev.values())[0])
+        for modelo, pr in prev.items():
+            m = metricas(df["rendimento_sacas_ha"][mascara], pr[mascara])
+            comparacao.append({"esquema": esquema, "variaveis": rotulo,
+                               "modelo": modelo, **{k: round(v, 3) for k, v in m.items()}})
+
+    m_base = metricas(df["rendimento_sacas_ha"][mascara],
+                      df["base_media_historica"][mascara])
+    comparacao.append({"esquema": esquema, "variaveis": "tradicional",
+                       "modelo": "media_historica",
+                       **{k: round(v, 3) for k, v in m_base.items()}})
+
+df_cenarios = pd.DataFrame(comparacao)
+print(df_cenarios.to_string(index=False))
+print("\nA diferença entre as duas primeiras linhas de cada esquema é o que o")
+print("clima acrescenta. É esse número que sustenta H1 — não o R² absoluto.")
+
+# ---- célula 21 (markdown) ----------------------------------------
+# ## 9. Coeficientes por estádio — a interpretabilidade que justifica o Elastic Net
+# 
+# Este é o argumento central do TCC: o Elastic Net não só prevê, ele mostra o peso de cada
+# variável. Com as variáveis separadas por estádio, o coeficiente responde a pergunta que
+# interessa ao produtor — *chuva na floração pesa mais que chuva no vegetativo?*
+
+# ---- célula 22 (código) -------------------------------------------
+colunas_m3 = montar_X(df, MOMENTOS["M3_completo"])
+X_full = df[colunas_m3].fillna(df[colunas_m3].median(numeric_only=True))
+y_full = df["rendimento_sacas_ha"].values
+grupos = df["cod_municipio"].values
+
+pipe, grade = construir_modelos()["elastic_net"]
+busca = GridSearchCV(pipe, grade, cv=GroupKFold(n_splits=N_FOLDS),
+                     scoring="neg_root_mean_squared_error", n_jobs=-1)
+busca.fit(X_full, y_full, groups=grupos)
+
+melhor = busca.best_estimator_
+coefs = melhor.named_steps["modelo"].coef_
+
+df_coef = pd.DataFrame({"variavel": colunas_m3, "coeficiente": coefs})
+df_coef["abs"] = df_coef["coeficiente"].abs()
+
+def estadio_da(v):
+    for e in ("vegetativo", "floracao", "enchimento"):
+        if v.startswith(e):
+            return e
+    if v.startswith("base_"):
+        return "historico"      # a média histórica não é clima nem solo
+    return "solo"
+
+df_coef["estadio"] = df_coef["variavel"].map(estadio_da)
+df_coef["zerada"] = df_coef["coeficiente"] == 0
+df_coef = df_coef.sort_values("abs", ascending=False)
+
+print(f"Hiperparâmetros escolhidos: {busca.best_params_}")
+print(f"Variáveis zeradas pela regularização L1: "
+      f"{int(df_coef['zerada'].sum())} de {len(df_coef)}")
+
+print("\n15 variáveis de maior peso:")
+print(df_coef.head(15)[["variavel", "coeficiente", "estadio"]]
+      .to_string(index=False))
+
+print("\nPeso total por estádio (soma dos |coeficientes|):")
+por_estadio = (df_coef.groupby("estadio")["abs"].sum()
+               .sort_values(ascending=False).round(3))
+print(por_estadio.to_string())
+print("\nO peso do clima é a soma de vegetativo + floracao + enchimento;")
+print("'historico' e 'solo' são o ponto de partida sobre o qual o clima acrescenta.")
+
+# ---- célula 23 (markdown) ----------------------------------------
+# ## 10. Comparação com o ex-ante da CONAB (opcional)
+# 
+# A CONAB publica 12 levantamentos por safra, cada um com a produtividade estimada em kg/ha por
+# UF. É a projeção *ex-ante* de referência: no mesmo momento do ciclo em que o seu modelo faz
+# uma previsão, a CONAB também tinha uma.
+# 
+# O arquivo esperado tem as colunas `UF`, `cultura_tcc`, `ano_pam`, `levantamento` (1–12) e
+# `produtividade_kg_ha`. Fontes: o portal de séries históricas da CONAB, os boletins mensais de
+# Acompanhamento da Safra, ou a biblioteca `agrobr`, que lê as planilhas públicas.
+# 
+# Como a CONAB é estadual, a comparação é feita na média por UF — comparar estado contra
+# município seria injusto com ela.
+
+# ---- célula 24 (código) -------------------------------------------
+import os
+
+if os.path.exists(ARQUIVO_CONAB):
+    conab = pd.read_excel(ARQUIVO_CONAB)
+    conab["projetado_conab_sacas"] = conab["produtividade_kg_ha"] / 60
+
+    # seu modelo, agregado ao nível estadual para a comparação ser justa
+    meu = (variacoes[variacoes["tipo"] == "modelo"]
+           .groupby(["UF", "cultura_tcc", "ano_pam", "momento", "origem"], as_index=False)
+           .agg(projetado=("projetado", "mean"), realizado=("realizado", "mean")))
+
+    comp = meu.merge(
+        conab.groupby(["UF", "cultura_tcc", "ano_pam"], as_index=False)
+             .agg(conab_media=("projetado_conab_sacas", "mean")),
+        on=["UF", "cultura_tcc", "ano_pam"], how="inner")
+
+    comp["erro_modelo"] = (comp["projetado"] - comp["realizado"]).abs()
+    comp["erro_conab"] = (comp["conab_media"] - comp["realizado"]).abs()
+    comp["modelo_melhor"] = comp["erro_modelo"] < comp["erro_conab"]
+
+    print("MODELO x CONAB (erro absoluto médio em sacas/ha, por UF)")
+    print(comp.groupby(["momento", "origem"])[["erro_modelo", "erro_conab"]]
+          .mean().round(2).to_string())
+    print(f"\nModelo mais preciso que a CONAB em "
+          f"{100 * comp['modelo_melhor'].mean():.0f}% das comparações.")
+else:
+    comp = pd.DataFrame()
+    print(f"'{ARQUIVO_CONAB}' não encontrado — etapa pulada.")
+    print("Para habilitar, monte a planilha com as colunas:")
+    print("  UF | cultura_tcc | ano_pam | levantamento | produtividade_kg_ha")
+
+# ---- célula 25 (markdown) ----------------------------------------
+# ## 11. Exportação
+
+# ---- célula 26 (código) -------------------------------------------
+df_hiper = pd.DataFrame([
+    {"esquema": k[0], "momento": k[1], "modelo": mod, "hiperparametros": str(p)}
+    for k, d in hiperparametros.items() for mod, p in d.items()
+])
+
+with pd.ExcelWriter(SAIDA, engine="openpyxl") as writer:
+    variacoes.to_excel(writer, sheet_name="variacoes", index=False)
+    df_resumo.to_excel(writer, sheet_name="desempenho", index=False)
+    df_coef.to_excel(writer, sheet_name="coeficientes", index=False)
+    df_hiper.to_excel(writer, sheet_name="hiperparametros", index=False)
+    if len(comp):
+        comp.to_excel(writer, sheet_name="vs_conab", index=False)
+
+print(f"Salvo: {SAIDA}")
+print("\nAbas:")
+print("  variacoes       — projetado x realizado, linha a linha (a base que você pediu)")
+print("  desempenho      — RMSE, MAE, R² por momento e origem")
+print("  coeficientes    — peso de cada variável, por estádio")
+print("  hiperparametros — alpha e l1_ratio escolhidos em cada configuração")
+if len(comp):
+    print("  vs_conab        — seu ex-ante contra o ex-ante da CONAB")
+
+# ---- célula 27 (markdown) ----------------------------------------
+# ## 12. O que levar para a defesa
+# 
+# **A tabela de desempenho responde a hipótese H1.** Se o Elastic Net em M2 tem RMSE menor que a
+# média histórica, o trabalho demonstrou que machine learning com dados climáticos supera o
+# método tradicional — que é literalmente o título do TCC. Se não tem, a conclusão honesta é
+# essa, e vale mais que um número inflado.
+# 
+# **A curva de convergência mostra que o modelo aprende com o clima.** Erro caindo de M1 para M3
+# significa que informação climática adicional melhora a previsão. Se o erro ficar igual nos três
+# momentos, o modelo está usando só solo e média — e isso precisa ser dito.
+# 
+# **A tabela de coeficientes é a contribuição prática.** Random Forest provavelmente terá RMSE um
+# pouco melhor. O argumento não é negar isso: é mostrar que o Elastic Net entrega, junto com a
+# previsão, o peso de cada variável por estádio — e que um produtor decidindo logística precisa
+# saber *por quê*, não só *quanto*. Apresente os dois números e defenda a escolha.
+# 
+# **O viés merece atenção.** Um modelo com RMSE bom mas viés sistemático (`vies` longe de zero)
+# erra sempre para o mesmo lado. Para planejamento de escoamento, subestimar sistematicamente é
+# pior que errar para os dois lados.

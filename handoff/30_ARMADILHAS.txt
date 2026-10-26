@@ -1,0 +1,119 @@
+================================================================================
+ARMADILHAS — erros já cometidos neste projeto, e o que os causou
+================================================================================
+
+Cada item abaixo passou despercebido por um tempo e só apareceu porque alguém
+conferiu. Estão aqui para não se repetirem.
+
+
+--------------------------------------------------------------------------------
+A. ERROS NO CÓDIGO, JÁ CORRIGIDOS
+--------------------------------------------------------------------------------
+
+A1. pandas: soma de série totalmente ausente devolve ZERO, não ausente.
+    df.agg("sum") sobre [NaN, NaN] = 0.0. Isso gerou 395 de 1.460 linhas (27%)
+    com valores fisicamente impossíveis: zero graus-dia na floração, zero
+    radiação no enchimento de grãos. Concentrados em 2021 e 2022.
+    CORREÇÃO: sum(min_count=1) em todos os acumulados.
+    GUARDA: há uma célula que aborta a execução se reaparecerem zeros
+    impossíveis. Não remover.
+
+A2. cobertura calculada sobre linhas presentes, não sobre semanas válidas.
+    Resultado: 1.447 de 1.460 registros com cobertura >= 99,9%, e o filtro de
+    cobertura mínima de 80% não excluía absolutamente nada.
+    CORREÇÃO: int(g["temp_media"].notna().sum()) / len(chaves)
+
+A3. baseline da média histórica usando safras POSTERIORES à prevista.
+    O método "tradicional" de comparação estava usando informação do futuro,
+    o que o tornava artificialmente forte em um ponto e artificialmente
+    comparável em outro.
+    CORREÇÃO: média expansiva, só sobre safras anteriores.
+
+A4. SIDRA: variável 112 é "rendimento médio kg/ha", NÃO um ano.
+    O código gravou safra='112' em 44.301 linhas do banco. Ainda está assim
+    online; a migração corrige.
+
+A5. fator de calibração do produtor comparando anos diferentes.
+    Dava 2,43x onde o correto era 1,20x.
+    CORREÇÃO: o ano passou a ser obrigatório no histórico, e a comparação é
+    contra o rendimento municipal real DAQUELE ano. Guarda de plausibilidade
+    entre 0,55 e 1,80.
+
+A6. semanas ISO partidas na virada do ano.
+    O ETL agrupa por (ano civil, semana ISO) em vez de (ano ISO, semana ISO).
+    Uma semana que atravessa 31/12 sai como DUAS linhas com o mesmo período.
+    São 3 casos em 47 mil, e eles quebrariam a chave única de CLIMA_SEMANAL.
+    CORREÇÃO: migrar_banco.py reúne os trechos na carga. O ETL continua
+    gerando a planilha com o defeito — se reexecutar o ETL, o defeito volta.
+    Pegadinha dentro da correção: dias_no_periodo vale 7 nos DOIS trechos
+    (é propriedade da semana), então somar dá 14. Usar máximo.
+
+A7. VPD calculado a partir da temperatura média diária.
+    A equação de Tetens é convexa, então es(média) < média de es(), e o
+    cálculo a partir da média subestima o estresse nos dias de maior
+    amplitude térmica.
+    CORREÇÃO: VPD hora a hora, agregado depois.
+    CUIDADO: o arquivo etl_tcc_semanal.txt na pasta é ANTERIOR a essa
+    correção e mostra a versão errada. O .ipynb está certo. Quem abrir o .txt
+    achando que é o código atual vai tirar conclusão errada — apagar ou
+    renomear para _antigo.
+
+
+--------------------------------------------------------------------------------
+B. ERROS DE AFIRMAÇÃO — mais perigosos que os de código
+--------------------------------------------------------------------------------
+
+B1. Descrever como existente uma tabela que era só proposta.
+    Eu escrevi em documento entregue que CLIMA_SEMANAL tinha 47.022 linhas,
+    chave única e chave estrangeira — como se fosse o estado do banco. Era o
+    CREATE TABLE do meu próprio script de migração, nunca executado. O autor
+    perguntou "de onde você tirou essa tabela?" e a resposta era: eu inventei.
+    REGRA: antes de descrever o banco, ler banco_inventario.txt. O que não
+    estiver lá não existe.
+
+B2. Generalizar um resultado a partir de um único caso.
+    Testei a seca em um município (Bagé) e concluí que o modelo identificava
+    a quebra. Ampliando para os 30 municípios do RS no esquema temporal, o
+    modelo previu 69,3 onde a realidade foi 31,6 — RMSE 41,78 contra 24,31
+    do tradicional. A conclusão anterior estava errada.
+
+B3. Afirmar sem testar, e estar errado.
+    Afirmei que agregação mensal destruiria o sinal por estádio. Testei:
+    semanal 18,01 contra mensal 18,14 de RMSE. Diferença de 0,7%.
+
+B4. Rotular o modelo como "clima + solo" por muitas mensagens seguidas.
+    Era só clima. O solo nunca entrou.
+
+B5. Medir uma coisa e declarar outra.
+    Declarei 0,024 ms de inferência; aquilo media só o produto escalar. A
+    chamada completa da calculadora leva 0,35 ms. Os dois números são
+    verdadeiros sobre coisas diferentes — o documento precisa dizer QUAL
+    está medindo.
+
+
+--------------------------------------------------------------------------------
+C. ARMADILHAS TÉCNICAS DE FERRAMENTA
+--------------------------------------------------------------------------------
+
+C1. sklearn 1.8 removeu fit_params de cross_val_predict. A validação cruzada
+    aninhada usa laço explícito por causa disso.
+
+C2. docx-js: linha de tabela partida na quebra de página -> cantSplit: true.
+    Sombreamento de célula: ShadingType.CLEAR (SOLID renderiza preto).
+    Larguras de tabela: em DXA, no columnWidths E em cada célula.
+
+C3. SVG sem width/height intrínsecos colapsa para 44x36 px ao renderizar
+    como imagem. Declarar width e height explicitamente.
+
+C4. matplotlib: aplicar FuncFormatter no eixo que tem rótulos de categoria
+    apaga os rótulos e mostra índices numéricos. Formatar só o eixo numérico.
+
+C5. pam_bruto traz 'cultura' E 'cultura_tcc'. Renomear 'cultura' cria colunas
+    duplicadas, e aí df['cultura_tcc'] devolve DataFrame em vez de Series.
+
+C6. fetch() relativo não funciona em file://. Para testar a calculadora
+    localmente, servir por HTTP (python -m http.server). Na página publicada
+    funciona normalmente.
+
+C7. MySQL marca [MUL] tanto para chave estrangeira quanto para índice comum.
+    Para distinguir, cruzar com information_schema.KEY_COLUMN_USAGE.

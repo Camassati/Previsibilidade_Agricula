@@ -1,0 +1,172 @@
+================================================================================
+CONTEXTO DO PROJETO — leia este arquivo primeiro
+TCC: Calculadora Agrícola — UNIP, Ciência da Computação, 2026
+================================================================================
+
+Este pacote transfere o estado de um trabalho em andamento para uma nova
+sessão. Os outros arquivos da pasta são material de apoio; este aqui é o mapa.
+
+Ordem sugerida de leitura:
+  00_CONTEXTO.txt     este arquivo
+  resultados.txt      todos os números medidos
+  10_RUNBOOK.txt      como rodar o pipeline, em ordem
+  20_PENDENCIAS.txt   o que falta fazer
+  30_ARMADILHAS.txt   erros já cometidos e corrigidos — não repetir
+  notebook_*.txt      código dos quatro notebooks
+  scripts.txt         código dos scripts auxiliares
+
+
+--------------------------------------------------------------------------------
+1. O QUE É O TRABALHO
+--------------------------------------------------------------------------------
+Título: "Análise Comparativa entre Modelos Tradicionais de Estimativa de
+Colheita e Algoritmos de Machine Learning".
+
+Cinco autores, orientador Marco Gomes. O documento entregue até aqui é o
+TC1.1 (PDF). O autor que conduz as sessões é o Eneas.
+
+A proposta é uma "Calculadora Agrícola" que estima o rendimento de uma safra
+a partir do clima do ciclo. O modelo escolhido é Elastic Net, justificado no
+TC1.1 pela interpretabilidade dos coeficientes — Random Forest foi
+explicitamente descartado por ser "caixa-preta".
+
+Há também um nó sensor IoT construído pelo grupo (ESP32), que funciona e tem
+leituras reais no banco, mas NÃO alimenta o modelo.
+
+
+--------------------------------------------------------------------------------
+2. COMO O SISTEMA FUNCIONA DE FATO
+--------------------------------------------------------------------------------
+Fonte de dados do modelo:
+  - INMET: 184 estações meteorológicas automáticas, SP/PR/RS/MT, 2020-2026,
+    CSV horário. Vira agregado semanal ISO 8601 por estação.
+  - IBGE/PAM via API SIDRA, tabela 5457, variável 112 (rendimento kg/ha).
+    Safras 2016-2024, soja, milho e trigo.
+  - A janela do ciclo de cada safra é recortada em três estádios fenológicos
+    (vegetativo 0-45%, floração 45-70%, enchimento 70-100%) e as variáveis
+    climáticas são agregadas por estádio. Isso gera 55 variáveis.
+
+Validação em dois esquemas, que respondem a perguntas diferentes:
+  - ESPACIAL: GroupKFold por município. Pergunta "funciona em município sem
+    histórico?". É onde o modelo ganha.
+  - TEMPORAL: treina em safras passadas, testa na seguinte. Pergunta "prevê a
+    próxima safra?". É onde o modelo perde.
+
+Os dois são reportados. Omitir o temporal seria desonesto e a banca tem
+acesso ao código.
+
+ATENÇÃO — o solo NÃO entra no modelo. A lista COLUNAS_SOLO está declarada no
+notebook de modelagem, mas o filtro "[c for c in COLUNAS_SOLO if c in
+df.columns]" devolve lista vazia porque essas colunas não existem em
+df_tcc_modelo.xlsx. O TC1.1 cita EMBRAPA como fonte e descreve codificação
+categórica de solo — as duas afirmações são falsas contra o código. Decisão
+pendente do grupo: ou tirar a menção, ou fazer o solo entrar de verdade.
+
+
+--------------------------------------------------------------------------------
+3. BANCO DE DADOS
+--------------------------------------------------------------------------------
+MySQL 5.7 hospedado na Locaweb (DBaaS). Credenciais ficam em banco_config.ini
+na máquina do autor — NÃO estão neste pacote e não devem ser coladas em chat.
+
+Estado atual do banco (8 tabelas), conforme banco_inventario.txt:
+  REGIAO                       181 linhas   catálogo de estações
+  TIPO_SOLO                     10 linhas   catálogo pedológico
+  CULTURA                        3 linhas   'Milho','Soja','Trigo'
+  CONFIGURACAO_SAFRA             1 linha    liga região+solo+cultura
+  SENSOR_IOT                     1 linha    ESP32/Espressif, ESP-NOW/MQTT
+  LEITURA_IOT                  718 linhas   temperatura e umidade reais
+  DADOS_CLIMATICOS_HISTORICOS 5.456 linhas  mensal, só de 2023 em diante
+  PRODUTIVIDADE_OBSERVADA    44.301 linhas  safra='112' em TODAS (defeito)
+
+A migração (migrar_banco.py) está escrita e testada em ensaio, mas NUNCA foi
+aplicada. Ela criaria CLIMA_SEMANAL e PONTE_ESTACAO_MUNICIPIO, reconstruiria
+DADOS_CLIMATICOS_HISTORICOS (10.785 linhas, 2020-2025) e corrigiria
+PRODUTIVIDADE_OBSERVADA. SENSOR_IOT, LEITURA_IOT e CONFIGURACAO_SAFRA são
+protegidas: o script conta antes e depois e aborta se mudarem.
+
+IMPORTANTE: enquanto --aplicar não rodar, qualquer texto que descreva
+CLIMA_SEMANAL ou PONTE_ESTACAO_MUNICIPIO está descrevendo um projeto, não o
+banco. Já houve um erro grave exatamente por isso (ver 30_ARMADILHAS.txt).
+
+Divergências entre o banco e o TC1.1 que precisam de decisão:
+  - SENSOR_IOT diz ESP-NOW/MQTT; o TC1.1 diz LoRaWAN com gateway, em cinco
+    lugares diferentes.
+  - frequencia_amostragem_min = 5, mas as leituras estão a 5 SEGUNDOS de
+    distância. Ou o valor está na unidade errada, ou o nome da coluna está.
+  - CULTURA guarda 'Milho'; PRODUTIVIDADE_OBSERVADA guarda 'Milho (em grão)'.
+    As duas tabelas não casam por nome.
+  - O TC1.1 afirma validações de domínio nas faixas do DHT22. MySQL 5.7
+    ACEITA a sintaxe CHECK e a IGNORA (só vale do 8.0.16 em diante).
+  - TIPO_SOLO.nome_solo é índice comum [MUL], não restrição de unicidade.
+  - O dicionário de dados do TC1.1 documenta 6 entidades; o banco tem 8.
+
+
+--------------------------------------------------------------------------------
+4. ACESSO — O QUE A IA CONSEGUE E O QUE NÃO CONSEGUE
+--------------------------------------------------------------------------------
+A sessão roda em contêiner isolado SEM DNS e SEM saída de rede direta. Só sai
+HTTPS por proxy, para domínios liberados. Portanto:
+
+  - NÃO é possível conectar no MySQL (porta 3306, protocolo binário).
+  - NÃO adianta pedir a senha: o caminho de rede não existe.
+  - O acesso ao banco é SEMPRE indireto: a IA escreve o script, o autor roda
+    na máquina dele, e cola ou envia a saída.
+  - Quando o app desktop está aberto, a IA consegue ler e gravar arquivos na
+    pasta C:\\Users\\Camassati\\Desktop\\TCC e, às vezes, rodar comandos lá.
+
+A página publicada da calculadora também não alcança o banco, pelo mesmo
+motivo. Os dados do sensor chegam por um JSON exportado (exportar_sensor.py).
+
+
+--------------------------------------------------------------------------------
+5. ENTREGÁVEIS JÁ PRODUZIDOS
+--------------------------------------------------------------------------------
+Documentos Word (gerados por script docx-js, regeneráveis):
+  secoes_revisadas.docx          seções 3.1 e 3.4 reescritas, ABNT, com
+                                 quadros de atributos e tipos
+  resultados_tcc.docx            Capítulo 4 completo, 8 páginas, 6 figuras,
+                                 2 quadros. Todos os números são LIDOS dos
+                                 arquivos de resultado na hora da geração.
+  DECLARACAO_DE_IA_preenchida.docx  declaração institucional, Quadro 1 com
+                                 13 linhas (hardware + pipeline)
+
+Figuras (JPG 300 dpi):
+  etl_fluxo.jpg                  fluxograma do ETL
+  der_banco.jpg                  diagrama entidade-relacionamento (DESATUALIZADO:
+                                 feito antes da PONTE_ESTACAO_MUNICIPIO)
+  figuras/fig9..fig14            dicionário de dados, uma por entidade,
+                                 geradas a partir de banco_inventario.txt
+  figuras/fig1..fig6             gráficos do Capítulo 4
+
+Páginas HTML:
+  calculadora_safra.html         a calculadora do produtor (município, grão,
+                                 solo, hectares, data de plantio -> data de
+                                 colheita e sacas). Publicada como artefato.
+  calculadora.html               versão anterior, com lucro
+  resultados.html                relatório de resultados — DESATUALIZADO,
+                                 ainda mostra +9,5% como manchete
+
+Texto solto:
+  avaliacao_modelo_corrigido.txt seção de avaliação do modelo reescrita, com
+                                 a lista do que mudou e por quê
+
+
+--------------------------------------------------------------------------------
+6. COMO O AUTOR TRABALHA — ler antes de responder a ele
+--------------------------------------------------------------------------------
+Ele reexecuta o que recebe e confere. Já pegou uma invenção minha e foi
+explícito: "você está estritamente proibido de inventar coisas".
+
+Então:
+  - Todo número vai para o documento LIDO de um arquivo de resultado, nunca
+    digitado. Os geradores (resultados.js, graficos_resultados.py,
+    figuras_entidades.py) fazem isso de propósito.
+  - Quando algo não puder ser verificado, DIZER que não foi verificado, e
+    deixar [CONFIRMAR] no lugar — não preencher por plausibilidade.
+  - Separar sempre o que é cópia da fonte do que é inferência própria.
+  - Ele pede "mostra o que deu certo" mas o trabalho vai para banca: esconder
+    o resultado negativo é o que cria problema, porque o código é auditável.
+    A delimitação de escopo é o argumento forte, não a omissão.
+
+Responder em português do Brasil.

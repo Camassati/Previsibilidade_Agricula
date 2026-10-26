@@ -1,0 +1,27 @@
+# --- NUNCA vai para o Git: credenciais do banco ---
+banco_config.ini
+*.ini
+.env
+
+# --- cópias de segurança da migração (dados do banco, só servem para desfazer) ---
+backup_*.csv
+
+# --- lixo do Python / Jupyter / Excel / Windows ---
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+~$*
+Thumbs.db
+desktop.ini
+cache_diario/
+*.zip
+cache_diario/
+Frame/firmware/mysql/segredos.py
+segredos.py
+validar_git.txt
+conferir_senhas.txt
+Frame/Driver/
+*.rar
+validar_git.txt
+conferir_senhas.txt
+Frame/Driver/

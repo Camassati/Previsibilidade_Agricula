@@ -1,0 +1,154 @@
+MySQL 5.7.32-35-log | banco: tcc2026
+8 tabelas
+
+========================================================================
+TABELA CONFIGURACAO_SAFRA  —  1 linhas
+========================================================================
+5 colunas:
+   id_config                          int(10) unsigned       NOT NULL  [PRI]
+   id_regiao                          int(10) unsigned       NOT NULL  [MUL]
+   id_solo                            int(10) unsigned       NOT NULL  [MUL]
+   id_cultura                         int(10) unsigned       NOT NULL  [MUL]
+   data_plantio                       date                   NULL     
+chaves estrangeiras:
+   id_cultura -> CULTURA.id_cultura
+   id_regiao -> REGIAO.id_regiao
+   id_solo -> TIPO_SOLO.id_solo
+amostra (3 linhas):
+   id_config=2, id_regiao=1, id_solo=1, id_cultura=1, data_plantio=datetime.date(2026, 9, 21)
+
+========================================================================
+TABELA CULTURA  —  3 linhas
+========================================================================
+3 colunas:
+   id_cultura                         int(10) unsigned       NOT NULL  [PRI]
+   nome_cultura                       varchar(150)           NOT NULL  [UNI]
+   ciclo_estimado_dias                int(11)                NULL     
+chaves estrangeiras: nenhuma
+amostra (3 linhas):
+   id_cultura=1, nome_cultura='Milho', ciclo_estimado_dias=120
+   id_cultura=2, nome_cultura='Soja', ciclo_estimado_dias=115
+   id_cultura=3, nome_cultura='Trigo', ciclo_estimado_dias=130
+
+========================================================================
+TABELA DADOS_CLIMATICOS_HISTORICOS  —  5,456 linhas
+========================================================================
+26 colunas:
+   id_clima                           bigint(20) unsigned    NOT NULL  [PRI]
+   id_regiao                          int(10) unsigned       NOT NULL  [MUL]
+   ano_mes                            date                   NOT NULL  [MUL]
+   dias_validos                       smallint(5) unsigned   NULL     
+   dias_no_mes                        smallint(5) unsigned   NULL     
+   cobertura                          decimal(6,2)           NULL     
+   temp_media                         decimal(6,2)           NULL     
+   temp_max_media                     decimal(6,2)           NULL     
+   temp_min_media                     decimal(6,2)           NULL     
+   temp_max_abs                       decimal(6,2)           NULL     
+   temp_min_abs                       decimal(6,2)           NULL     
+   amplitude_termica                  decimal(6,2)           NULL     
+   graus_dia_acum                     decimal(10,2)          NULL     
+   precipitacao_total_mm              decimal(10,2)          NULL     
+   dias_com_chuva                     smallint(5) unsigned   NULL     
+   maior_veranico                     smallint(5) unsigned   NULL     
+   umidade_media                      decimal(6,2)           NULL     
+   umidade_min_abs                    decimal(6,2)           NULL     
+   vpd_medio_kpa                      decimal(8,3)           NULL     
+   orvalho_medio                      decimal(6,2)           NULL     
+   radiacao_total_mjm2                decimal(10,2)          NULL     
+   pressao_media                      decimal(8,2)           NULL     
+   vento_medio                        decimal(8,2)           NULL     
+   vento_rajada_max                   decimal(8,2)           NULL     
+   vento_dir_predom                   decimal(8,2)           NULL     
+   vento_dir_consistencia             decimal(8,2)           NULL     
+chaves estrangeiras:
+   id_regiao -> REGIAO.id_regiao
+amostra (3 linhas):
+   id_clima=1, id_regiao=1, ano_mes=datetime.date(2023, 1, 1), dias_validos=31, dias_no_mes=31, cobertura=Decimal('1.00'), temp_media=Decimal('22.28'), temp_max_media=Decimal('27.94') ...
+   id_clima=2, id_regiao=1, ano_mes=datetime.date(2023, 2, 1), dias_validos=28, dias_no_mes=28, cobertura=Decimal('1.00'), temp_media=Decimal('22.91'), temp_max_media=Decimal('28.66') ...
+   id_clima=3, id_regiao=1, ano_mes=datetime.date(2023, 3, 1), dias_validos=31, dias_no_mes=31, cobertura=Decimal('1.00'), temp_media=Decimal('23.07'), temp_max_media=Decimal('29.85') ...
+
+========================================================================
+TABELA LEITURA_IOT  —  718 linhas
+========================================================================
+6 colunas:
+   id_leitura                         bigint(20) unsigned    NOT NULL  [PRI]
+   id_config                          int(10) unsigned       NOT NULL  [MUL]
+   id_sensor                          int(10) unsigned       NOT NULL  [MUL]
+   temperatura                        decimal(6,2)           NULL     
+   umidade_relativa                   decimal(6,2)           NULL     
+   data_hora                          timestamp              NOT NULL  [MUL]
+chaves estrangeiras:
+   id_config -> CONFIGURACAO_SAFRA.id_config
+   id_sensor -> SENSOR_IOT.id_sensor
+amostra (3 linhas):
+   id_leitura=1390, id_config=2, id_sensor=0, temperatura=Decimal('23.90'), umidade_relativa=Decimal('71.90'), data_hora=datetime.datetime(2026, 10, 5, 19, 30, 14)
+   id_leitura=1391, id_config=2, id_sensor=0, temperatura=Decimal('23.90'), umidade_relativa=Decimal('71.80'), data_hora=datetime.datetime(2026, 10, 5, 19, 30, 19)
+   id_leitura=1392, id_config=2, id_sensor=0, temperatura=Decimal('23.90'), umidade_relativa=Decimal('71.80'), data_hora=datetime.datetime(2026, 10, 5, 19, 30, 24)
+
+========================================================================
+TABELA PRODUTIVIDADE_OBSERVADA  —  44,301 linhas
+========================================================================
+8 colunas:
+   id_produtividade                   bigint(20) unsigned    NOT NULL  [PRI]
+   cod_municipio_ibge                 int(10) unsigned       NULL     
+   municipio_ibge                     varchar(150)           NULL     
+   uf                                 char(2)                NOT NULL  [MUL]
+   cultura_tcc                        varchar(100)           NOT NULL  [MUL]
+   safra                              varchar(20)            NULL      [MUL]
+   rendimento_kg_ha                   decimal(12,2)          NULL     
+   rendimento_sacas_ha                decimal(10,2)          NULL     
+chaves estrangeiras: nenhuma
+amostra (3 linhas):
+   id_produtividade=1, cod_municipio_ibge=5100102, municipio_ibge='Acorizal - MT', uf='MT', cultura_tcc='Milho (em grão)', safra='112', rendimento_kg_ha=Decimal('2700.00'), rendimento_sacas_ha=Decimal('45.00')
+   id_produtividade=2, cod_municipio_ibge=5100102, municipio_ibge='Acorizal - MT', uf='MT', cultura_tcc='Milho (em grão)', safra='112', rendimento_kg_ha=Decimal('2700.00'), rendimento_sacas_ha=Decimal('45.00')
+   id_produtividade=3, cod_municipio_ibge=5100102, municipio_ibge='Acorizal - MT', uf='MT', cultura_tcc='Milho (em grão)', safra='112', rendimento_kg_ha=Decimal('1200.00'), rendimento_sacas_ha=Decimal('20.00')
+
+========================================================================
+TABELA REGIAO  —  181 linhas
+========================================================================
+4 colunas:
+   id_regiao                          int(10) unsigned       NOT NULL  [PRI]
+   uf                                 char(2)                NOT NULL  [MUL]
+   cidade                             varchar(150)           NOT NULL  [MUL]
+   cod_estacao                        varchar(50)            NULL     
+chaves estrangeiras: nenhuma
+amostra (3 linhas):
+   id_regiao=116, uf='MT', cidade='AGUA BOA', cod_estacao='A908'
+   id_regiao=131, uf='MT', cidade='ALTA FLORESTA', cod_estacao='A924'
+   id_regiao=117, uf='MT', cidade='ALTO ARAGUAIA', cod_estacao='A909'
+
+========================================================================
+TABELA SENSOR_IOT  —  1 linhas
+========================================================================
+6 colunas:
+   id_sensor                          int(10) unsigned       NOT NULL  [PRI]
+   modelo                             varchar(100)           NOT NULL 
+   fabricante                         varchar(100)           NULL     
+   protocolo_comunicacao              varchar(50)            NULL     
+   frequencia_amostragem_min          int(10) unsigned       NULL     
+   status_operacional                 varchar(30)            NULL     
+chaves estrangeiras: nenhuma
+amostra (3 linhas):
+   id_sensor=0, modelo='ESP32', fabricante='Espressif', protocolo_comunicacao='ESP-NOW/MQTT', frequencia_amostragem_min=5, status_operacional='ATIVO'
+
+========================================================================
+TABELA TIPO_SOLO  —  10 linhas
+========================================================================
+12 colunas:
+   id_solo                            int(10) unsigned       NOT NULL  [PRI]
+   nome_solo                          varchar(150)           NOT NULL  [MUL]
+   ordem_solo                         varchar(100)           NULL     
+   textura                            varchar(100)           NULL     
+   fonte                              varchar(255)           NULL     
+   retencao_agua                      tinyint(3) unsigned    NULL     
+   drenagem                           tinyint(3) unsigned    NULL     
+   aptidao_graos                      tinyint(3) unsigned    NULL     
+   profundidade                       tinyint(3) unsigned    NULL     
+   risco_erosao                       tinyint(3) unsigned    NULL     
+   culturas_predominantes             varchar(255)           NULL     
+   descricao                          text                   NULL     
+chaves estrangeiras: nenhuma
+amostra (3 linhas):
+   id_solo=1, nome_solo='Latossolo Vermelho', ordem_solo='Latossolo', textura='Argilosa', fonte=None, retencao_agua=4, drenagem=5, aptidao_graos=5 ...
+   id_solo=2, nome_solo='Latossolo Amarelo', ordem_solo='Latossolo', textura='Média/Argilosa', fonte=None, retencao_agua=4, drenagem=5, aptidao_graos=4 ...
+   id_solo=3, nome_solo='Argissolo Vermelho-Amarelo', ordem_solo='Argissolo', textura='Média/Argilosa', fonte=None, retencao_agua=3, drenagem=4, aptidao_graos=4 ...

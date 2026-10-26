@@ -1,0 +1,436 @@
+# ==========================================================================
+# NOTEBOOK: calculadora_agricola.ipynb
+# células: 12
+# ==========================================================================
+
+
+# ---- célula 0 (markdown) ----------------------------------------
+# # Calculadora Agrícola — estimativa para o produtor
+# 
+# Front-end da Calculadora Agrícola, em `ipywidgets` dentro do JupyterLab,
+# conforme a seção 3.2.2 do projeto.
+# 
+# O modelo Elastic Net prevê o **rendimento médio do município**. Esta interface
+# faz a ponte até o resultado do produtor: aplica a área dele, um fator de
+# calibração opcional a partir do histórico que ele informar, o preço da saca e o
+# custo por hectare, e devolve sacas, lucro e **risco de ficar abaixo do ponto de
+# equilíbrio**.
+# 
+# Não devolve um número só. O erro do modelo é grande demais para isso — e uma
+# lavoura individual varia mais que a média municipal, não menos. O que a tela
+# mostra é a estimativa central e a faixa provável, que é o que permite decidir.
+# 
+# **Antes de executar:** `pip install ipywidgets matplotlib` e os arquivos
+# `calculadora.py` e `modelo_export.json` na mesma pasta.
+
+# ---- célula 1 (markdown) ----------------------------------------
+# ## 1. Carregar o modelo
+
+# ---- célula 2 (código) -------------------------------------------
+import time
+import numpy as np
+import matplotlib
+import matplotlib.pyplot as plt
+import ipywidgets as w
+from IPython.display import display, clear_output
+
+from calculadora import Calculadora, brl, PRECO_REF, CUSTO_REF
+
+calc = Calculadora("modelo_export.json")
+
+CULTURAS = sorted({l["c"] for l in calc.linhas})
+print(f"Modelo carregado: {len(calc.linhas)} combinações município x cultura x safra")
+print(f"Culturas: {', '.join(CULTURAS)}")
+for nome, m in calc.d["momentos"].items():
+    print(f"  {nome}: {len(m['variaveis']):2d} variáveis | RMSE fora da amostra "
+          f"{m['rmse_oos']:.2f} sacas/ha | {m['zeradas']} zeradas pelo L1")
+
+# ---- célula 3 (markdown) ----------------------------------------
+# ## 2. RNF01 — tempo de inferência
+# 
+# O requisito não funcional estabelece 50 ms. O Elastic Net é um produto escalar
+# sobre as variáveis escaladas, então a inferência é barata — mas o requisito pede
+# medição, não argumento.
+
+# ---- célula 4 (código) -------------------------------------------
+t0 = time.perf_counter()
+N = 1000
+for k in range(N):
+    calc.prever_rendimento(k % len(calc.linhas), "M3")
+ms = (time.perf_counter() - t0) * 1000 / N
+
+print(f"Inferência média sobre {N} execuções: {ms:.3f} ms")
+print(f"RNF01 (<= 50 ms): {'ATENDIDO' if ms <= 50 else 'NAO ATENDIDO'}")
+print(f"Folga: {50/ms:.0f}x" if ms else "")
+
+# ---- célula 5 (markdown) ----------------------------------------
+# ## 3. Paleta e funções de desenho
+# 
+# Cores validadas para daltonismo: a separação mínima entre pares adjacentes fica
+# acima do limiar de 8 na métrica OKLab, nos três tipos de dicromacia.
+
+# ---- célula 6 (código) -------------------------------------------
+COR = {"modelo": "#2a78d6", "alerta": "#eb6834", "ok": "#1baf7a",
+       "faixa": "#cfe0f5", "neutro": "#9aa291", "tinta": "#1c2119",
+       "secundaria": "#4f5649", "grade": "#e6e4dc"}
+matplotlib.rcParams.update({
+    "figure.facecolor": "white", "axes.facecolor": "white",
+    "axes.edgecolor": COR["grade"], "axes.labelcolor": COR["secundaria"],
+    "text.color": COR["tinta"], "xtick.color": COR["secundaria"],
+    "ytick.color": COR["secundaria"], "font.size": 10,
+    "axes.spines.top": False, "axes.spines.right": False,
+})
+MOMENTOS = ["M1", "M2", "M3"]
+ROTULO = {"M1": "M1\nvegetativo", "M2": "M2\nfloracao", "M3": "M3\nciclo completo"}
+
+
+def grafico_progressao(ax, serie, equilibrio, realizado=None, historica=None):
+    """Como a estimativa evolui conforme o ciclo avanca. E a Figura 18 do projeto."""
+    x = np.arange(len(MOMENTOS))
+    central = [s["central"]["rendimento_sacas_ha"] for s in serie]
+    baixo = [s["provavel_baixo"]["rendimento_sacas_ha"] for s in serie]
+    alto = [s["provavel_alto"]["rendimento_sacas_ha"] for s in serie]
+    pess = [s["pessimista"]["rendimento_sacas_ha"] for s in serie]
+    otim = [s["otimista"]["rendimento_sacas_ha"] for s in serie]
+
+    ax.fill_between(x, pess, otim, color=COR["faixa"], alpha=.45, lw=0,
+                    label="faixa 10-90%")
+    ax.fill_between(x, baixo, alto, color=COR["faixa"], alpha=.85, lw=0,
+                    label="faixa provavel 25-75%")
+    ax.plot(x, central, "-o", color=COR["modelo"], lw=2, ms=7,
+            mec="white", mew=1.5, label="estimativa", zorder=5)
+
+    ax.axhline(equilibrio, color=COR["alerta"], ls="--", lw=1.5,
+               label=f"equilibrio {equilibrio:.0f} sc/ha")
+    if historica is not None:
+        ax.axhline(historica, color=COR["neutro"], ls=":", lw=1.5,
+                   label=f"media historica {historica:.0f}")
+    if realizado is not None:
+        ax.axhline(realizado, color=COR["ok"], lw=1.8,
+                   label=f"realizado {realizado:.0f}")
+
+    ax.set_xticks(x); ax.set_xticklabels([ROTULO[m] for m in MOMENTOS])
+    ax.set_ylabel("sacas por hectare")
+    ax.set_title("Estimativa ao longo do ciclo", loc="left", fontsize=12,
+                 fontweight="600", pad=12)
+    ax.grid(axis="y", color=COR["grade"], lw=.8)
+    ax.set_axisbelow(True)
+    ax.legend(frameon=False, fontsize=8.5, loc="best", ncol=2)
+
+
+def grafico_contribuicoes(ax, contrib, n=9):
+    """Quanto cada variavel empurra a previsao. E o que o Elastic Net entrega
+    e a Random Forest nao: a leitura direta do peso de cada entrada."""
+    itens = contrib[:n][::-1]
+    y = np.arange(len(itens))
+    val = [c["contribuicao"] for c in itens]
+    cor = [COR["ok"] if v >= 0 else COR["alerta"] for v in val]
+    ax.barh(y, val, color=cor, height=.68)
+    ax.set_yticks(y)
+    ax.set_yticklabels([c["variavel"].replace("_", " ") for c in itens], fontsize=8.5)
+    ax.axvline(0, color=COR["grade"], lw=1)
+    for i, v in enumerate(val):
+        ax.text(v + (0.6 if v >= 0 else -0.6), i, f"{v:+.1f}",
+                va="center", ha="left" if v >= 0 else "right", fontsize=8.5,
+                color=COR["secundaria"])
+    ax.set_xlabel("contribuicao (sacas/ha)")
+    ax.set_title("O que pesa nesta estimativa", loc="left", fontsize=12,
+                 fontweight="600", pad=12)
+    ax.grid(axis="x", color=COR["grade"], lw=.8)
+    ax.set_axisbelow(True)
+    lim = max(abs(min(val)), abs(max(val))) * 1.3
+    ax.set_xlim(-lim, lim)
+
+print("Funcoes de desenho carregadas.")
+
+# ---- célula 7 (markdown) ----------------------------------------
+# ## 4. Formulário
+# 
+# Primeiro bloco da interface. Cada campo valida na hora: o aviso aparece sem que
+# o usuário precise disparar a consulta para descobrir o erro (RF02).
+
+# ---- célula 8 (código) -------------------------------------------
+est = {"cultura": CULTURAS[0], "indice": None}
+
+L = w.Layout(width="330px")
+EST = {"description_width": "130px"}
+
+dd_cultura = w.Dropdown(options=CULTURAS, description="Cultura:", layout=L, style=EST)
+dd_local = w.Dropdown(options=[], description="Municipio:", layout=L, style=EST)
+dd_safra = w.Dropdown(options=[], description="Safra:", layout=L, style=EST)
+ft_area = w.BoundedFloatText(value=100, min=0.1, max=100000, step=10,
+                             description="Area (ha):", layout=L, style=EST)
+dd_momento = w.Dropdown(options=[("M1 - so vegetativo", "M1"),
+                                 ("M2 - ate a floracao", "M2"),
+                                 ("M3 - ciclo completo", "M3")],
+                        value="M3", description="Momento:", layout=L, style=EST)
+ft_preco = w.BoundedFloatText(value=0, min=0, max=10000, step=1,
+                              description="Preco (R$/sc):", layout=L, style=EST)
+ft_custo = w.BoundedFloatText(value=0, min=0, max=200000, step=100,
+                              description="Custo (R$/ha):", layout=L, style=EST)
+tx_hist = w.Textarea(value="", placeholder="opcional - uma safra por linha:\n2023: 62\n2024: 58",
+                     description="Seu historico:", layout=w.Layout(width="330px", height="78px"),
+                     style=EST)
+aviso = w.HTML("")
+btn = w.Button(description="Calcular estimativa", button_style="success",
+               icon="calculator", layout=w.Layout(width="330px", height="38px"))
+
+
+def municipios(cultura):
+    vistos, saida = set(), []
+    for i, l in enumerate(calc.linhas):
+        if l["c"] == cultura and l["m"] not in vistos:
+            vistos.add(l["m"]); saida.append((f"{l['nome']} / {l['uf']}", l["m"]))
+    return sorted(saida)
+
+
+def safras(cultura, cod):
+    return sorted([(str(l["s"]), i) for i, l in enumerate(calc.linhas)
+                   if l["c"] == cultura and l["m"] == cod], key=lambda t: t[0])
+
+
+def ler_historico(texto):
+    """Converte o texto livre em pares (ano, rendimento_do_produtor).
+
+    O ANO e obrigatorio: cada safra informada e comparada ao rendimento real
+    do municipio NAQUELE MESMO ano. Sem o ano nao da para calibrar, porque a
+    razao mediria a diferenca entre safras, nao entre o produtor e a regiao.
+
+    Aceita '2023: 62', '2023 62' ou '2023 - 62'. Linha sem ano reconhecivel e
+    ignorada e reportada, em vez de derrubar o calculo.
+    """
+    pares, ruins = [], []
+    for linha in texto.strip().splitlines():
+        if not linha.strip():
+            continue
+        numeros = []
+        for p in linha.replace(":", " ").replace("-", " ").replace(",", ".").split():
+            try:
+                numeros.append(float(p))
+            except ValueError:
+                pass
+        ano = next((int(v) for v in numeros if 1990 <= v <= 2100), None)
+        rend = next((v for v in numeros if 1 <= v <= 400), None)
+        if ano is None or rend is None:
+            ruins.append(linha.strip())
+        else:
+            pares.append((ano, rend))
+    return pares, ruins
+
+
+def ao_trocar_cultura(_=None):
+    c = dd_cultura.value
+    est["cultura"] = c
+    dd_local.options = municipios(c)
+    ft_preco.value = PRECO_REF.get(c, 100.0)
+    ft_custo.value = CUSTO_REF.get(c, 5000.0)
+    ao_trocar_local()
+
+
+def ao_trocar_local(_=None):
+    if dd_local.value is None:
+        dd_safra.options = []
+    else:
+        dd_safra.options = safras(est["cultura"], dd_local.value)
+    validar()
+
+
+def validar(_=None):
+    problemas = []
+    if dd_local.value is None:
+        problemas.append("escolha um municipio")
+    if dd_safra.value is None:
+        problemas.append("escolha uma safra")
+    if ft_area.value <= 0:
+        problemas.append("area tem que ser maior que zero")
+    if ft_preco.value <= 0:
+        problemas.append("informe o preco da saca")
+    if ft_custo.value <= 0:
+        problemas.append("informe o custo por hectare")
+    if problemas:
+        aviso.value = ("<div style='color:#9a3412;font-size:13px;padding:4px 0'>&#9888; "
+                       + " &middot; ".join(problemas) + "</div>")
+        btn.disabled = True
+    else:
+        eq = ft_custo.value / ft_preco.value
+        aviso.value = ("<div style='color:#4f5649;font-size:13px;padding:4px 0'>"
+                       f"Ponto de equilibrio: <b>{eq:.1f} sacas/ha</b></div>")
+        btn.disabled = False
+
+
+for ctl, fn in [(dd_cultura, ao_trocar_cultura), (dd_local, ao_trocar_local),
+                (dd_safra, validar), (ft_area, validar),
+                (ft_preco, validar), (ft_custo, validar)]:
+    ctl.observe(fn, names="value")
+
+ao_trocar_cultura()
+formulario = w.VBox([
+    w.HTML("<h3 style='margin:0 0 10px'>Dados do plantio</h3>"),
+    dd_cultura, dd_local, dd_safra, ft_area, dd_momento,
+    w.HTML("<h3 style='margin:14px 0 10px'>Preco e custo</h3>"),
+    ft_preco, ft_custo,
+    w.HTML("<h3 style='margin:14px 0 10px'>Calibracao (opcional)</h3>"
+           "<div style='font-size:12px;color:#858c7c;max-width:330px;margin-bottom:6px'>"
+           "Informe duas ou mais safras suas, com o ano, e a calculadora compara "
+           "cada uma com o que o municipio fez naquele mesmo ano.</div>"),
+    tx_hist, aviso, btn,
+])
+print("Formulario montado. Execute a proxima celula para exibir a tela.")
+
+# ---- célula 9 (markdown) ----------------------------------------
+# ## 5. Área de resultado
+# 
+# Segundo bloco. Só é renderizado depois que o cálculo retorna, e traz os dois
+# gráficos Matplotlib com a descrição em texto (RF03, RF04).
+
+# ---- célula 10 (código) -------------------------------------------
+saida = w.Output()
+
+
+def ao_clicar(_):
+    with saida:
+        clear_output(wait=True)
+        idx = dd_safra.value
+        hist, ruins = ler_historico(tx_hist.value)
+
+        serie = [calc.calcular(idx, ft_area.value, m, historico=hist,
+                               preco=ft_preco.value, custo_ha=ft_custo.value)
+                 for m in MOMENTOS]
+        r = serie[MOMENTOS.index(dd_momento.value)]
+
+        if ruins:
+            print("Linhas do historico ignoradas (precisa de ano e rendimento, "
+                  f"ex. '2023: 62'): {ruins}")
+        if r["safras_ignoradas"]:
+            print(f"Safras sem dado do municipio na base, desconsideradas: "
+                  f"{r['safras_ignoradas']}")
+        if len(r["safras_usadas"]) == 1:
+            print("Uma safra so nao define um padrao: a calibracao precisa de duas. "
+                  "Usando a estimativa do municipio sem ajuste.")
+        for u in r["safras_usadas"]:
+            print(f"   {u['ano']}: voce {u['produtor']:.0f} sc/ha | municipio "
+                  f"{u['municipio']:.0f} | razao {u['razao']:.2f}")
+        suspeito = calc.fator_suspeito(r["fator_produtor"], r["safras_usadas"])
+        if suspeito:
+            display(w.HTML(
+                "<div style='background:#fbf6e8;border-left:3px solid #d9b64a;"
+                "border-radius:0 8px 8px 0;padding:12px 16px;margin:8px 0;"
+                f"color:#6b5410;font-size:13.5px;max-width:760px'>&#9888; {suspeito}</div>"))
+
+        risco = r["prob_abaixo_equilibrio"]
+        cor_risco = "#9a3412" if risco > .5 else ("#8a6a12" if risco > .25 else "#1f6b2e")
+        cal = ("sem calibracao - estimativa do municipio" if r["fator_produtor"] == 1.0
+               else f"calibrado em {r['fator_produtor']:.2f}x "
+                    f"({len(r['safras_usadas'])} safras suas)")
+
+        CEN = [("Pessimista (10%)", r["pessimista"], 0),
+               ("Provavel baixo (25%)", r["provavel_baixo"], 0),
+               ("Central", r["central"], 1),
+               ("Provavel alto (75%)", r["provavel_alto"], 0),
+               ("Otimista (90%)", r["otimista"], 0)]
+        cab = ("<tr style='color:#858c7c;font-size:11px;text-transform:uppercase;"
+               "letter-spacing:.07em'>"
+               + "".join("<th style='text-align:%s;padding:8px 10px;"
+                         "border-bottom:1px solid #e0ded6'>%s</th>" % (a, t)
+                         for a, t in [("left", "Cenario"), ("right", "sc/ha"),
+                                      ("right", "Sacas"), ("right", "Receita"),
+                                      ("right", "Lucro")])
+               + "</tr>")
+        corpo = []
+        for nome, v, destaque in CEN:
+            fundo = "background:#f6f5f1;" if destaque else ""
+            cl = "#9a3412" if v["lucro"] < 0 else "#1f6b2e"
+            td = "padding:7px 10px;border-bottom:1px solid #eeece5;"
+            corpo.append(
+                "<tr style='%s'>"
+                "<td style='%s'>%s</td>"
+                "<td style='%stext-align:right'>%.1f</td>"
+                "<td style='%stext-align:right'>%s</td>"
+                "<td style='%stext-align:right'>%s</td>"
+                "<td style='%stext-align:right;color:%s'>%s</td></tr>"
+                % (fundo, td, nome, td, v["rendimento_sacas_ha"],
+                   td, f"{v['sacas_totais']:,.0f}".replace(",", "."),
+                   td, brl(v["receita"]), td, cl, brl(v["lucro"])))
+        sacas_fmt = f"{r['central']['sacas_totais']:,.0f}".replace(",", ".")
+        TABELA = ("<table style='border-collapse:collapse;width:100%;font-size:13.5px;"
+                  "margin-top:14px'>" + cab + "".join(corpo))
+
+        display(w.HTML(f"""
+        <div style="font-family:system-ui;max-width:760px">
+          <h2 style="margin:6px 0 2px">{r['municipio']} / {r['uf']}
+            <span style="font-weight:400;color:#858c7c;font-size:16px">
+            &middot; {r['cultura']} &middot; safra {r['safra']} &middot;
+            {r['area_ha']:.0f} ha</span></h2>
+          <div style="color:#858c7c;font-size:13px;margin-bottom:16px">
+            Momento {r['momento']} &middot; {cal}</div>
+          <div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:8px">
+            <div style="flex:1;min-width:170px;border:1px solid #e0ded6;border-left:3px solid #2a78d6;
+                        border-radius:9px;padding:14px 16px">
+              <div style="font-size:12px;color:#858c7c">Estimativa central</div>
+              <div style="font-size:26px;font-weight:600">
+                {r['central']['rendimento_sacas_ha']:.0f} <span style="font-size:14px;font-weight:400">sc/ha</span></div>
+              <div style="font-size:12.5px;color:#4f5649">
+                {sacas_fmt} sacas no total</div>
+            </div>
+            <div style="flex:1;min-width:170px;border:1px solid #e0ded6;border-left:3px solid #1baf7a;
+                        border-radius:9px;padding:14px 16px">
+              <div style="font-size:12px;color:#858c7c">Lucro estimado</div>
+              <div style="font-size:26px;font-weight:600">{brl(r['central']['lucro'])}</div>
+              <div style="font-size:12.5px;color:#4f5649">
+                margem {r['central']['margem_pct']:.0f}%</div>
+            </div>
+            <div style="flex:1;min-width:170px;border:1px solid #e0ded6;border-left:3px solid {cor_risco};
+                        border-radius:9px;padding:14px 16px">
+              <div style="font-size:12px;color:#858c7c">Risco de prejuizo</div>
+              <div style="font-size:26px;font-weight:600;color:{cor_risco}">{100*risco:.0f}%</div>
+              <div style="font-size:12.5px;color:#4f5649">
+                abaixo de {r['ponto_equilibrio_sacas_ha']:.0f} sc/ha</div>
+            </div>
+          </div>
+          {TABELA}
+
+          <div style="font-size:12.5px;color:#858c7c;margin-top:12px;line-height:1.55">
+            Custo considerado: {brl(r['custo_hectare'])}/ha &middot;
+            preco {brl(r['preco_saca'])}/saca &middot;
+            custo total {brl(r['central']['custo'])}.<br>
+            A faixa vem da distribuicao real dos erros do modelo fora da amostra
+            nesta cultura, nao de um intervalo teorico.
+          </div>
+        </div>"""))
+
+        fig, (a1, a2) = plt.subplots(1, 2, figsize=(13.5, 4.6))
+        grafico_progressao(a1, serie, r["ponto_equilibrio_sacas_ha"],
+                           realizado=r["realizado_sacas_ha"],
+                           historica=r["media_historica_sacas_ha"])
+        grafico_contribuicoes(a2, r["contribuicoes"])
+        plt.tight_layout()
+        plt.show()
+
+        erro = r["central"]["rendimento_sacas_ha"] - r["realizado_sacas_ha"]
+        erro_trad = r["media_historica_sacas_ha"] - r["realizado_sacas_ha"]
+        melhor = "o modelo" if abs(erro) < abs(erro_trad) else "a media historica"
+        print(f"Conferencia contra o realizado desta safra ({r['realizado_sacas_ha']:.1f} sc/ha):")
+        print(f"   modelo          {r['central']['rendimento_sacas_ha']:6.1f}  erro {erro:+6.1f}")
+        print(f"   media historica {r['media_historica_sacas_ha']:6.1f}  erro {erro_trad:+6.1f}")
+        print(f"   nesta linha, {melhor} chegou mais perto.")
+
+
+btn.on_click(ao_clicar)
+display(w.VBox([formulario, w.HTML("<hr style='border:none;border-top:1px solid #e0ded6;margin:20px 0'>"),
+                saida]))
+
+# ---- célula 11 (markdown) ----------------------------------------
+# ## 6. O que esta tela responde
+# 
+# | requisito | como |
+# |---|---|
+# | RF02 — entrada de parâmetros | formulário com cultura, município, safra, área, preço e custo, com validação por campo |
+# | RF03 — cálculo de estimativas | `calculadora.py` roda o Elastic Net e converte para sacas e lucro |
+# | RF04 — geração de gráficos | progressão da estimativa ao longo do ciclo e contribuição das variáveis |
+# | RNF01 — inferência ≤ 50 ms | medido na seção 2 |
+# 
+# **Limitação a declarar.** O modelo prevê o rendimento *médio do município*. A
+# lavoura individual varia mais que essa média, então o erro para um produtor
+# específico é maior que o RMSE municipal, não menor. O fator de calibração
+# corrige o nível médio do produtor, não a variação dele entre safras. Por isso a
+# tela entrega faixa e risco, nunca um número isolado.

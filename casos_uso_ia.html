@@ -1,0 +1,344 @@
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0"><title>Casos de uso da IA</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Relatório técnico: claro, uma coluna, cada caso de uso como ficha fechada */
+:root{
+ color-scheme:light;
+ --bg:#fbfaf7; --card:#ffffff; --card2:#f6f5f1;
+ --ink:#1c2119; --ink2:#4f5649; --mut:#858c7c;
+ --line:rgba(40,52,34,.13); --line2:rgba(40,52,34,.08);
+ --azul:#2a78d6; --verde:#1baf7a; --laranja:#eb6834;
+ --ok:#1f6b2e; --okbg:#eaf4ea;
+ --av:#8a6a12; --avbg:#fbf6e8; --avln:#d9b64a;
+ --ru:#9a3412; --rubg:#fbeae2;
+ --d:"Fraunces",Georgia,serif; --b:"Inter",system-ui,sans-serif; --m:"IBM Plex Mono",ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--b);font-size:16px;line-height:1.62;
+ padding-block:0;padding-left:20px;padding-right:20px}
+.wrap{max-width:880px;margin:0 auto;padding-block:54px 72px}
+h1{font-family:var(--d);font-size:clamp(29px,5vw,42px);line-height:1.1;font-weight:600;
+ margin:0 0 15px;letter-spacing:-.015em;text-wrap:balance}
+h2{font-family:var(--d);font-size:clamp(21px,3.2vw,28px);font-weight:600;line-height:1.2;
+ margin:0 0 14px;text-wrap:balance}
+h3{font-size:16.5px;font-weight:600;margin:22px 0 9px}
+p{margin:0 0 14px;color:var(--ink2);max-width:68ch}
+.lead{font-size:18px;color:var(--ink)}
+strong{color:var(--ink);font-weight:600}
+code{font-family:var(--m);font-size:.87em;background:var(--card2);padding:1px 5px;border-radius:4px}
+.eyebrow{font-family:var(--m);font-size:11.5px;letter-spacing:.13em;text-transform:uppercase;
+ color:var(--mut);margin:0 0 10px}
+header{border-bottom:1px solid var(--line);padding-bottom:26px;margin-bottom:40px}
+section{margin-bottom:46px}
+.sechead{display:flex;align-items:baseline;gap:14px;margin-bottom:18px;padding-top:6px;
+ border-top:1px solid var(--line)}
+.sechead .num{font-family:var(--m);font-size:12px;color:var(--mut);padding-top:9px;flex:none}
+figure{margin:0 0 22px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px;min-width:0}
+figcaption{font-size:13.5px;color:var(--mut);margin-top:14px;line-height:1.5}
+svg{display:block;max-width:100%;height:auto}
+.uc{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:0;
+ margin:0 0 18px;overflow:hidden}
+.uc > header{border:none;border-bottom:1px solid var(--line);padding:16px 20px;margin:0;
+ background:var(--card2);display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.uc .id{font-family:var(--m);font-size:12px;color:var(--mut);font-weight:500}
+.uc .nome{font-weight:600;font-size:16.5px;color:var(--ink)}
+.uc .corpo{padding:16px 20px}
+.uc dl{margin:0;display:grid;grid-template-columns:140px minmax(0,1fr);gap:9px 16px;font-size:14.5px}
+@media (max-width:540px){.uc dl{grid-template-columns:1fr;gap:3px 0}.uc dt{margin-top:10px}}
+.uc dt{font-family:var(--m);font-size:11px;letter-spacing:.07em;text-transform:uppercase;
+ color:var(--mut);padding-top:3px}
+.uc dd{margin:0;color:var(--ink2)}
+.uc dd ol,.uc dd ul{margin:0;padding-left:18px}
+.uc dd li{margin-bottom:4px}
+.uc .limite{border-top:1px solid var(--line2);margin:14px -20px -16px;padding:13px 20px;
+ background:var(--avbg);color:var(--av);font-size:13.5px}
+.uc .limite strong{color:var(--av)}
+.tw{overflow-x:auto;margin:16px 0;border:1px solid var(--line);border-radius:10px;background:var(--card)}
+table{border-collapse:collapse;width:100%;font-size:14px;min-width:520px}
+th{font-family:var(--m);font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--mut);
+ text-align:left;padding:11px 14px;border-bottom:1px solid var(--line);font-weight:500;white-space:nowrap}
+th.n,td.n{text-align:right;font-family:var(--m);font-variant-numeric:tabular-nums}
+td{padding:9px 14px;border-bottom:1px solid var(--line2);color:var(--ink2);vertical-align:top}
+td.k{color:var(--ink);font-weight:500;white-space:nowrap}
+tbody tr:last-child td{border-bottom:none}
+.box{border:1px solid var(--line);border-left:3px solid var(--mut);border-radius:0 11px 11px 0;
+ padding:17px 21px;margin:20px 0;background:var(--card)}
+.box.av{border-left-color:var(--avln);background:var(--avbg)}
+.box.av p,.box.av strong{color:var(--av)}
+.box.ok{border-left-color:var(--ok);background:var(--okbg)}
+.box.ok p,.box.ok strong{color:#17532a}
+.box h3{margin-top:0}
+.box p:last-child{margin-bottom:0}
+ul,ol{margin:0 0 14px;padding-left:21px;color:var(--ink2);max-width:68ch}
+li{margin-bottom:7px} li::marker{color:var(--mut)}
+footer{border-top:1px solid var(--line);padding-top:22px;margin-top:10px;font-size:13px;color:var(--mut)}
+@media (max-width:560px){.wrap{padding-block:38px 54px}}
+</style>
+
+<div class="wrap">
+<header>
+  <p class="eyebrow">Calculadora Agrícola · casos de uso</p>
+  <h1>O que a IA faz, para quem, e onde ela falha</h1>
+  <p class="lead">Especificação dos casos de uso do componente de aprendizado de máquina:
+  atores, fluxos, pré e pós-condições, e o limite medido de cada um. Cada caso traz o
+  número que diz até onde ele é confiável — porque um caso de uso sem limite declarado
+  não é especificação, é promessa.</p>
+</header>
+
+<section>
+  <div class="sechead"><span class="num">01</span><div><h2>Atores</h2></div></div>
+  <div class="tw"><table>
+    <thead><tr><th>ator</th><th>tipo</th><th>o que faz no sistema</th></tr></thead>
+    <tbody>
+      <tr><td class="k">Produtor rural</td><td>primário, humano</td>
+        <td>Informa cultura, município, safra, área, preço e custo; recebe estimativa, faixa e risco</td></tr>
+      <tr><td class="k">Agrônomo</td><td>secundário, humano</td>
+        <td>Valida as janelas de ciclo e confere se os coeficientes batem com a literatura</td></tr>
+      <tr><td class="k">Pesquisador</td><td>secundário, humano</td>
+        <td>Treina, valida e audita o modelo; mantém o pipeline</td></tr>
+      <tr><td class="k">Sensor IoT</td><td>primário, sistema</td>
+        <td>ESP32 em campo, grava temperatura e umidade em <code>LEITURA_IOT</code></td></tr>
+      <tr><td class="k">INMET / IBGE</td><td>externo, sistema</td>
+        <td>Fornecem o clima horário e o rendimento observado por município</td></tr>
+    </tbody></table></div>
+
+  <figure>
+    <svg viewBox="0 0 820 400" role="img" aria-label="Diagrama de casos de uso: produtor rural aciona estimar rendimento, calibrar, avaliar risco e explicar; pesquisador aciona treinar e auditar; sensor IoT e as fontes externas alimentam o sistema">
+      <defs>
+        <marker id="pt" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+      <g font-family="Inter, system-ui, sans-serif" font-size="12" fill="currentColor">
+        <rect x="235" y="18" width="350" height="364" rx="14" fill="none" stroke="currentColor"
+              stroke-width="1.2" opacity=".35"/>
+        <text x="410" y="42" text-anchor="middle" font-size="11.5" opacity=".6"
+              font-family="IBM Plex Mono, monospace">CALCULADORA AGRÍCOLA</text>
+
+        <g stroke="currentColor" stroke-width="1.3" fill="none">
+          <circle cx="70" cy="110" r="13"/><path d="M70 123 L70 158 M50 136 L90 136 M70 158 L55 182 M70 158 L85 182"/>
+          <circle cx="70" cy="268" r="13"/><path d="M70 281 L70 316 M50 294 L90 294 M70 316 L55 340 M70 316 L85 340"/>
+          <rect x="722" y="96" width="76" height="46" rx="6"/>
+          <rect x="722" y="250" width="76" height="46" rx="6"/>
+        </g>
+        <text x="70" y="202" text-anchor="middle" font-size="12">Produtor</text>
+        <text x="70" y="218" text-anchor="middle" font-size="12">rural</text>
+        <text x="70" y="360" text-anchor="middle" font-size="12">Pesquisador</text>
+        <text x="760" y="124" text-anchor="middle" font-size="11.5">Sensor IoT</text>
+        <text x="760" y="278" text-anchor="middle" font-size="11.5">INMET</text>
+        <text x="760" y="293" text-anchor="middle" font-size="11.5">IBGE</text>
+
+        <g fill="none" stroke="currentColor" stroke-width="1.2">
+          <ellipse cx="410" cy="88" rx="140" ry="24"/>
+          <ellipse cx="410" cy="150" rx="140" ry="24"/>
+          <ellipse cx="410" cy="212" rx="140" ry="24"/>
+          <ellipse cx="410" cy="274" rx="140" ry="24"/>
+          <ellipse cx="410" cy="336" rx="140" ry="24"/>
+        </g>
+        <g text-anchor="middle" font-size="12.5">
+          <text x="410" y="92">UC01 · Estimar rendimento</text>
+          <text x="410" y="154">UC02 · Calibrar pelo histórico</text>
+          <text x="410" y="216">UC03 · Avaliar risco de prejuízo</text>
+          <text x="410" y="278">UC04 · Explicar a estimativa</text>
+          <text x="410" y="340">UC05 · Treinar e validar</text>
+        </g>
+
+        <g stroke="currentColor" stroke-width="1.1" fill="none" opacity=".75">
+          <path d="M92 150 L268 92" marker-end="url(#pt)"/>
+          <path d="M92 158 L268 150" marker-end="url(#pt)"/>
+          <path d="M92 170 L268 210" marker-end="url(#pt)"/>
+          <path d="M92 180 L268 272" marker-end="url(#pt)"/>
+          <path d="M92 300 L268 338" marker-end="url(#pt)"/>
+          <path d="M720 119 L552 274" marker-end="url(#pt)" stroke-dasharray="5 4"/>
+          <path d="M720 273 L552 336" marker-end="url(#pt)"/>
+          <path d="M720 266 L552 92" marker-end="url(#pt)"/>
+        </g>
+        <text x="648" y="188" font-size="10.5" opacity=".7" text-anchor="middle">não alimenta</text>
+        <text x="648" y="202" font-size="10.5" opacity=".7" text-anchor="middle">a previsão</text>
+      </g>
+    </svg>
+    <figcaption>A seta tracejada do sensor existe no diagrama do TC1.1 como linha cheia.
+    Aqui ela é tracejada porque as leituras do ESP32 não entram no treino nem na previsão
+    — o sensor demonstra a arquitetura, o INMET fornece o dado.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <div class="sechead"><span class="num">02</span><div><h2>Especificação dos casos</h2></div></div>
+
+  <article class="uc">
+    <header><span class="id">UC01</span><span class="nome">Estimar rendimento da safra</span></header>
+    <div class="corpo">
+      <dl>
+        <dt>Ator</dt><dd>Produtor rural</dd>
+        <dt>Objetivo</dt><dd>Saber quantas sacas por hectare esperar, com faixa de incerteza</dd>
+        <dt>Pré-condição</dt><dd>Existe clima do ciclo para o município e a safra escolhidos, com cobertura efetiva de pelo menos 80%</dd>
+        <dt>Entrada</dt><dd>Cultura, município, safra, área em hectares, momento do ciclo (M1, M2 ou M3)</dd>
+        <dt>Fluxo principal</dt><dd><ol>
+          <li>O sistema busca as variáveis climáticas por estádio fenológico</li>
+          <li>Aplica a escala Min-Max ajustada no treino</li>
+          <li>Calcula o produto escalar com os coeficientes do Elastic Net do momento escolhido</li>
+          <li>Soma o intercepto e devolve o rendimento em sacas por hectare</li>
+          <li>Posiciona a estimativa na distribuição empírica de resíduos daquela cultura e devolve os percentis 10, 25, 75 e 90</li>
+        </ol></dd>
+        <dt>Fluxo alternativo</dt><dd>Variável climática ausente → imputa a mediana do conjunto de treino, nunca a do teste</dd>
+        <dt>Pós-condição</dt><dd>Estimativa central, faixa provável e total de sacas na área informada</dd>
+        <dt>Desempenho</dt><dd>Inferência medida em <strong>0,024 ms</strong> — folga de ~2.000× sobre o RNF01</dd>
+      </dl>
+      <div class="limite"><strong>Limite medido.</strong> RMSE de 19,46 sacas/ha em município
+      sem histórico. A lavoura individual varia <em>mais</em> que a média municipal, então
+      esse valor é o piso do erro para um produtor específico, não o teto. Por isso o caso
+      de uso devolve faixa, nunca número isolado.</div>
+    </div>
+  </article>
+
+  <article class="uc">
+    <header><span class="id">UC02</span><span class="nome">Calibrar pelo histórico do produtor</span></header>
+    <div class="corpo">
+      <dl>
+        <dt>Ator</dt><dd>Produtor rural</dd>
+        <dt>Objetivo</dt><dd>Ajustar a estimativa municipal ao nível de produtividade da lavoura dele</dd>
+        <dt>Pré-condição</dt><dd>Duas ou mais safras informadas, cada uma com o ano</dd>
+        <dt>Fluxo principal</dt><dd><ol>
+          <li>Para cada safra informada, busca o rendimento real do município <strong>naquele mesmo ano</strong></li>
+          <li>Calcula a razão entre o rendimento do produtor e o do município</li>
+          <li>O fator é a média das razões</li>
+          <li>Multiplica a estimativa e os resíduos pelo fator</li>
+        </ol></dd>
+        <dt>Fluxo alternativo</dt><dd><ul>
+          <li>Menos de duas safras → fator 1,0 e aviso de que anedota não é padrão</li>
+          <li>Ano sem dado do município → safra descartada, com aviso</li>
+          <li>Fator fora de 0,55–1,80 → alerta de provável erro de unidade (sacas da área toda em vez de por hectare)</li>
+        </ul></dd>
+        <dt>Pós-condição</dt><dd>Estimativa calibrada e tabela auditável com as razões usadas</dd>
+      </dl>
+      <div class="limite"><strong>Limite.</strong> O fator corrige o <em>nível médio</em> do
+      produtor, não a variação dele entre safras. Exigir o ano é obrigatório: comparar a
+      safra dele de 2023 com o município em 2022 mede a diferença entre anos, não entre o
+      produtor e a região — foi exatamente o defeito corrigido na primeira versão, que
+      produzia fatores de 2,4× onde o correto era 1,2×.</div>
+    </div>
+  </article>
+
+  <article class="uc">
+    <header><span class="id">UC03</span><span class="nome">Avaliar risco de prejuízo</span></header>
+    <div class="corpo">
+      <dl>
+        <dt>Ator</dt><dd>Produtor rural</dd>
+        <dt>Objetivo</dt><dd>Saber a chance de a safra não cobrir o custo de produção</dd>
+        <dt>Entrada</dt><dd>Preço da saca e custo por hectare</dd>
+        <dt>Fluxo principal</dt><dd><ol>
+          <li>Ponto de equilíbrio = custo por hectare ÷ preço da saca</li>
+          <li>Projeta a distribuição empírica de resíduos sobre a estimativa central</li>
+          <li>Conta a fração dos cenários abaixo do equilíbrio</li>
+          <li>Devolve receita, custo e lucro em cinco cenários</li>
+        </ol></dd>
+        <dt>Pós-condição</dt><dd>Probabilidade de prejuízo e tabela de cenários</dd>
+      </dl>
+      <div class="limite"><strong>Este é o caso de uso que justifica o trabalho.</strong> A
+      probabilidade não depende de o modelo vencer a média histórica — depende de a
+      distribuição de erros estar bem medida. Funciona mesmo nos recortes onde o modelo
+      perde em RMSE, e é o que um produtor usa para decidir.</div>
+    </div>
+  </article>
+
+  <article class="uc">
+    <header><span class="id">UC04</span><span class="nome">Explicar a estimativa</span></header>
+    <div class="corpo">
+      <dl>
+        <dt>Atores</dt><dd>Produtor rural, agrônomo</dd>
+        <dt>Objetivo</dt><dd>Ver quanto cada variável climática empurrou a previsão</dd>
+        <dt>Pré-condição</dt><dd>O modelo é linear — é o que torna este caso possível</dd>
+        <dt>Fluxo principal</dt><dd><ol>
+          <li>Decompõe a previsão em coeficiente × variável escalada</li>
+          <li>Ordena por magnitude absoluta e devolve as maiores com sinal</li>
+        </ol></dd>
+        <dt>Pós-condição</dt><dd>Lista ordenada de contribuições em sacas por hectare</dd>
+      </dl>
+      <div class="limite"><strong>É por este caso que o Elastic Net foi escolhido.</strong>
+      Ele custa 1,9% de erro a mais que o Random Forest (19,46 contra 19,09) e entrega a
+      decomposição que a floresta não entrega. Os coeficientes batem com a agronomia:
+      calor extremo no enchimento é o maior efeito isolado (−78,3), VPD do vegetativo
+      negativo, chuva do vegetativo positiva. Doze das 55 variáveis foram zeradas pelo L1.</div>
+    </div>
+  </article>
+
+  <article class="uc">
+    <header><span class="id">UC05</span><span class="nome">Treinar e validar o modelo</span></header>
+    <div class="corpo">
+      <dl>
+        <dt>Ator</dt><dd>Pesquisador</dd>
+        <dt>Objetivo</dt><dd>Produzir um modelo cuja medida de erro seja confiável</dd>
+        <dt>Fluxo principal</dt><dd><ol>
+          <li>Validação cruzada aninhada, com busca de hiperparâmetros <em>dentro</em> de cada fold de treino</li>
+          <li>Esquema espacial: <code>GroupKFold</code> por município — o modelo nunca vê o município de teste</li>
+          <li>Esquema temporal: treina nas safras anteriores, testa na seguinte</li>
+          <li>Três momentos de corte: M1 vegetativo, M2 floração, M3 ciclo completo, com <code>assert</code> impedindo estádio futuro</li>
+          <li>Compara contra três métodos tradicionais, incluindo a média histórica indexada pelo ano</li>
+        </ol></dd>
+        <dt>Pós-condição</dt><dd>Métricas por esquema e momento, coeficientes e base de variações projetado × realizado</dd>
+      </dl>
+      <div class="limite"><strong>O k-fold aleatório que o TC1.1 descreve não serve aqui.</strong>
+      Ele colocaria safras do mesmo município em treino e teste, inflando o R². O
+      agrupamento por município é o que torna a medida honesta.</div>
+    </div>
+  </article>
+</section>
+
+<section>
+  <div class="sechead"><span class="num">03</span><div><h2>Onde a IA não deve ser usada</h2></div></div>
+  <p>Um relatório de caso de uso que só lista o que funciona é propaganda. Estes três
+  recortes foram medidos e o modelo não deve ser aplicado neles.</p>
+  <div class="tw"><table>
+    <thead><tr><th>situação</th><th class="n">modelo</th><th class="n">tradicional</th><th>o que usar</th></tr></thead>
+    <tbody>
+      <tr><td class="k">Prever a próxima safra<br><span style="color:var(--mut);font-weight:400">município com histórico</span></td>
+        <td class="n">22,47</td><td class="n">21,22</td>
+        <td>A média histórica do município. O modelo perde 5,9%</td></tr>
+      <tr><td class="k">Safra de quebra, em previsão real<br><span style="color:var(--mut);font-weight:400">RS 2022, 30 municípios</span></td>
+        <td class="n">41,78</td><td class="n">12,30</td>
+        <td>A média indexada pelo ano. O modelo previu 69,3 onde a lavoura fez 31,6</td></tr>
+      <tr><td class="k">Clima atípico<br><span style="color:var(--mut);font-weight:400">quartil superior de anomalia</span></td>
+        <td class="n">16,77</td><td class="n">14,78</td>
+        <td>O tradicional. Não há concentração de valor nos anos atípicos</td></tr>
+    </tbody></table></div>
+  <div class="box av">
+    <p><strong>A regra que resume os três.</strong> O modelo acrescenta valor onde
+    <em>não há histórico do município</em> — ali ganha 3,0% do melhor comparador. Onde o
+    histórico existe, ele não substitui a média; e sem nenhuma informação da safra em
+    curso, perde. Um caso de uso que prometa previsão pura a partir do passado está
+    prometendo o que foi medido e refutado.</p>
+  </div>
+</section>
+
+<section>
+  <div class="sechead"><span class="num">04</span><div><h2>Rastreabilidade com o TC1.1</h2></div></div>
+  <div class="tw"><table>
+    <thead><tr><th>requisito</th><th>caso de uso</th><th>situação</th></tr></thead>
+    <tbody>
+      <tr><td class="k">RF01 — processar CSV</td><td>UC05</td><td>Atende, com CSV do INMET</td></tr>
+      <tr><td class="k">RF02 — entrada de parâmetros</td><td>UC01, UC02, UC03</td><td>Atende, com validação por campo</td></tr>
+      <tr><td class="k">RF03 — cálculo de estimativas</td><td>UC01</td><td>Parcial: devolve rendimento, não a data de colheita</td></tr>
+      <tr><td class="k">RF04 — geração de gráficos</td><td>UC01, UC04</td><td>Atende</td></tr>
+      <tr><td class="k">RNF01 — inferência ≤ 50 ms</td><td>UC01</td><td>Atende, 0,024 ms medidos</td></tr>
+      <tr><td class="k">CT01 — validação de leitura IoT</td><td>—</td><td>Executável: o ESP32 gravou 718 leituras</td></tr>
+      <tr><td class="k">CT02 — inferência ≤ 50 ms</td><td>UC01</td><td>Atende</td></tr>
+      <tr><td class="k">CT03 — anomalia sem overfitting</td><td>UC05</td><td>Atende via validação aninhada e teste de anomalia</td></tr>
+    </tbody></table></div>
+  <div class="box ok">
+    <p><strong>Para a seção 3.2.3 do TC1.1.</strong> A avaliação por IA está nas três
+    frentes que o texto promete — métricas (RMSE, MAE, R²), diagnóstico de ajuste por
+    validação cruzada com grid search, e análise de coeficientes com conferência contra a
+    literatura agronômica. O que o texto não previa, e que vale acrescentar, é a quarta
+    frente: a <strong>análise de robustez</strong>, que mede não só se o modelo acerta mas
+    <em>em que condições</em> ele deixa de acertar.</p>
+  </div>
+</section>
+
+<footer>
+  <p>Métricas da rodada sobre 920 safras-município em SP, PR, RS e MT (2020–2024).
+  RMSE em sacas por hectare, previsão fora da amostra. O comparador tradicional é a média
+  histórica expansiva do município, indexada pelo fator do ano onde indicado.</p>
+</footer>
+</div>
+</body></html>

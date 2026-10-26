@@ -1,0 +1,252 @@
+<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head><body style="margin:0"><title>Modelo de dados da Calculadora</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Documento técnico claro: uma coluna, diagrama largo com rolagem própria */
+:root{
+ color-scheme:light;
+ --bg:#fbfaf7; --card:#ffffff; --card2:#f6f5f1;
+ --ink:#1c2119; --ink2:#4f5649; --mut:#858c7c;
+ --line:rgba(40,52,34,.13); --line2:rgba(40,52,34,.08);
+ --ref:#2a78d6; --iot:#1baf7a; --fato:#eb6834; --novo:#7b3fb8;
+ --ok:#1f6b2e; --okbg:#eaf4ea;
+ --av:#8a6a12; --avbg:#fbf6e8; --avln:#d9b64a;
+ --ru:#9a3412; --rubg:#fbeae2;
+ --d:"Fraunces",Georgia,serif; --b:"Inter",system-ui,sans-serif; --m:"IBM Plex Mono",ui-monospace,monospace;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--b);font-size:16px;line-height:1.62;
+ padding-block:0;padding-left:20px;padding-right:20px}
+.wrap{max-width:900px;margin:0 auto;padding-block:54px 72px}
+h1{font-family:var(--d);font-size:clamp(29px,5vw,42px);line-height:1.1;font-weight:600;
+ margin:0 0 15px;letter-spacing:-.015em;text-wrap:balance}
+h2{font-family:var(--d);font-size:clamp(21px,3.2vw,28px);font-weight:600;line-height:1.2;
+ margin:0 0 14px;text-wrap:balance}
+h3{font-size:16.5px;font-weight:600;margin:24px 0 9px}
+p{margin:0 0 15px;color:var(--ink2);max-width:68ch}
+.lead{font-size:18px;color:var(--ink)}
+strong{color:var(--ink);font-weight:600}
+code{font-family:var(--m);font-size:.87em;background:var(--card2);padding:1px 5px;border-radius:4px}
+.eyebrow{font-family:var(--m);font-size:11.5px;letter-spacing:.13em;text-transform:uppercase;
+ color:var(--mut);margin:0 0 10px}
+header{border-bottom:1px solid var(--line);padding-bottom:26px;margin-bottom:40px}
+section{margin-bottom:48px}
+.sechead{display:flex;align-items:baseline;gap:14px;margin-bottom:18px;padding-top:6px;
+ border-top:1px solid var(--line)}
+.sechead .num{font-family:var(--m);font-size:12px;color:var(--mut);padding-top:9px;flex:none}
+figure{margin:0 0 22px;background:var(--card);border:1px solid var(--line);border-radius:12px;
+ padding:20px;min-width:0}
+figcaption{font-size:13.5px;color:var(--mut);margin-top:14px;line-height:1.5}
+.rolagem{overflow-x:auto}
+svg{display:block;max-width:100%;height:auto}
+/* só o DER precisa de largura mínima: abaixo disso as caixas colam umas nas
+   outras. Ele rola dentro do próprio container, e o body nunca rola de lado. */
+.rolagem svg{min-width:720px;max-width:none}
+.tw{overflow-x:auto;margin:16px 0;border:1px solid var(--line);border-radius:10px;background:var(--card)}
+table{border-collapse:collapse;width:100%;font-size:14px;min-width:540px}
+th{font-family:var(--m);font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--mut);
+ text-align:left;padding:11px 14px;border-bottom:1px solid var(--line);font-weight:500;white-space:nowrap}
+th.n,td.n{text-align:right}
+td{padding:9px 14px;border-bottom:1px solid var(--line2);color:var(--ink2);vertical-align:top}
+td.k{color:var(--ink);font-weight:500;font-family:var(--m);font-size:13px;white-space:nowrap}
+tbody tr:last-child td{border-bottom:none}
+.n{font-family:var(--m);font-variant-numeric:tabular-nums}
+.tag{display:inline-block;font-family:var(--m);font-size:10px;letter-spacing:.06em;
+ text-transform:uppercase;padding:2px 8px;border-radius:999px;font-weight:500;white-space:nowrap}
+.t-ref{background:#e4eefb;color:#1b5496} .t-iot{background:#e0f5ec;color:#117853}
+.t-fato{background:#fcebe3;color:#a8441a} .t-novo{background:#f0e8fa;color:#5c2c8c}
+.box{border:1px solid var(--line);border-left:3px solid var(--mut);border-radius:0 11px 11px 0;
+ padding:17px 21px;margin:20px 0;background:var(--card)}
+.box.av{border-left-color:var(--avln);background:var(--avbg)}
+.box.av p,.box.av strong{color:var(--av)}
+.box.ok{border-left-color:var(--ok);background:var(--okbg)}
+.box.ok p,.box.ok strong{color:#17532a}
+.box h3{margin-top:0}
+.box p:last-child{margin-bottom:0}
+ul,ol{margin:0 0 15px;padding-left:21px;color:var(--ink2);max-width:68ch}
+li{margin-bottom:7px} li::marker{color:var(--mut)}
+.legenda{display:flex;flex-wrap:wrap;gap:8px 20px;font-size:13px;color:var(--ink2);margin:0 0 16px}
+.legenda span{display:inline-flex;align-items:center;gap:7px}
+.sw{width:11px;height:11px;border-radius:3px;flex:none}
+footer{border-top:1px solid var(--line);padding-top:22px;margin-top:10px;font-size:13px;color:var(--mut)}
+@media (max-width:560px){.wrap{padding-block:38px 54px}}
+</style>
+
+<div class="wrap">
+<header>
+  <p class="eyebrow">Calculadora Agrícola · modelo de dados</p>
+  <h1>O banco, como está e como fica</h1>
+  <p class="lead">Diagrama entidade-relacionamento do MySQL do TCC. Oito tabelas existem
+  hoje; três entram com a migração. O desenho relacional já está correto — chaves
+  primárias, estrangeiras e normalização — e é o dado que precisa ser atualizado.</p>
+</header>
+
+<section>
+  <div class="legenda">
+    <span><i class="sw" style="background:var(--ref)"></i>catálogo de referência</span>
+    <span><i class="sw" style="background:var(--iot)"></i>instrumentação IoT</span>
+    <span><i class="sw" style="background:var(--fato)"></i>fatos observados</span>
+    <span><i class="sw" style="background:var(--novo)"></i>entra com a migração</span>
+  </div>
+
+  <figure>
+    <div class="rolagem">
+<svg viewBox="0 0 985 560" role="img" aria-label="Diagrama entidade-relacionamento do banco: REGIAO referencia TIPO_SOLO e recebe CLIMA_SEMANAL e DADOS_CLIMATICOS_HISTORICOS; CONFIGURACAO_SAFRA referencia regiao, solo e cultura e recebe as leituras do SENSOR_IOT; PRODUTIVIDADE_OBSERVADA e BASE_MODELO ficam sem chave estrangeira">
+<defs><marker id="fk" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="currentColor"/></marker></defs>
+<g font-family="IBM Plex Mono, ui-monospace, monospace">
+<path d="M470 210 L470 175 L132 175 L132 141" fill="none" stroke="currentColor" stroke-width="1.15" opacity=".6" marker-end="url(#fk)"/><text x="250" y="168" font-size="9.5" fill="currentColor" opacity=".7" text-anchor="middle">solo</text><path d="M500 210 L500 190 L322 190 L322 126" fill="none" stroke="currentColor" stroke-width="1.15" opacity=".6" marker-end="url(#fk)"/><text x="400" y="183" font-size="9.5" fill="currentColor" opacity=".7" text-anchor="middle">cultura</text><path d="M560 210 L560 142" fill="none" stroke="currentColor" stroke-width="1.15" opacity=".6" marker-end="url(#fk)"/><text x="592" y="180" font-size="9.5" fill="currentColor" opacity=".7" text-anchor="middle">localiza</text><path d="M128 270 L128 250 L415 250 L415 145 L428 138" fill="none" stroke="currentColor" stroke-width="1.15" opacity=".6" marker-end="url(#fk)"/><text x="268" y="243" font-size="9.5" fill="currentColor" opacity=".7" text-anchor="middle">mede semanal</text><path d="M400 278 L426 146" fill="none" stroke="currentColor" stroke-width="1.15" opacity=".6" marker-end="url(#fk)"/><text x="372" y="232" font-size="9.5" fill="currentColor" opacity=".7" text-anchor="middle">mensal</text><path d="M867 390 L867 126" fill="none" stroke="currentColor" stroke-width="1.15" opacity=".6" marker-end="url(#fk)"/><text x="902" y="270" font-size="9.5" fill="currentColor" opacity=".7" text-anchor="middle">registra</text><path d="M790 420 L614 290" fill="none" stroke="currentColor" stroke-width="1.15" opacity=".6" marker-end="url(#fk)"/><text x="712" y="372" font-size="9.5" fill="currentColor" opacity=".7" text-anchor="middle">contextualiza</text>
+<g><rect x="40" y="40" width="175" height="96" rx="7" fill="var(--card)" stroke="#2a78d6" stroke-width="1.5"/><path d="M40 65 H215" stroke="#2a78d6" stroke-width="1" opacity=".5"/><text x="50" y="57" font-size="11.5" font-weight="600" fill="#2a78d6">TIPO_SOLO</text><text x="50" y="78" font-size="10.5" fill="currentColor" opacity=".78">id_solo  PK</text><text x="50" y="93" font-size="10.5" fill="currentColor" opacity=".78">nome_solo  UK</text><text x="50" y="108" font-size="10.5" fill="currentColor" opacity=".78">textura</text><text x="50" y="123" font-size="10.5" fill="currentColor" opacity=".78">5 atributos</text></g><g><rect x="245" y="40" width="155" height="81" rx="7" fill="var(--card)" stroke="#2a78d6" stroke-width="1.5"/><path d="M245 65 H400" stroke="#2a78d6" stroke-width="1" opacity=".5"/><text x="255" y="57" font-size="11.5" font-weight="600" fill="#2a78d6">CULTURA</text><text x="255" y="78" font-size="10.5" fill="currentColor" opacity=".78">id_cultura  PK</text><text x="255" y="93" font-size="10.5" fill="currentColor" opacity=".78">nome_cultura  UK</text><text x="255" y="108" font-size="10.5" fill="currentColor" opacity=".78">ciclo_dias</text></g><g><rect x="430" y="40" width="180" height="96" rx="7" fill="var(--card)" stroke="#2a78d6" stroke-width="1.5"/><path d="M430 65 H610" stroke="#2a78d6" stroke-width="1" opacity=".5"/><text x="440" y="57" font-size="11.5" font-weight="600" fill="#2a78d6">REGIAO</text><text x="440" y="78" font-size="10.5" fill="currentColor" opacity=".78">id_regiao  PK</text><text x="440" y="93" font-size="10.5" fill="currentColor" opacity=".78">uf, cidade</text><text x="440" y="108" font-size="10.5" fill="currentColor" opacity=".78">cod_estacao</text><text x="440" y="123" font-size="10.5" fill="currentColor" opacity=".78">id_solo  FK ★</text></g><g><rect x="790" y="40" width="155" height="81" rx="7" fill="var(--card)" stroke="#1baf7a" stroke-width="1.5"/><path d="M790 65 H945" stroke="#1baf7a" stroke-width="1" opacity=".5"/><text x="800" y="57" font-size="11.5" font-weight="600" fill="#1baf7a">SENSOR_IOT</text><text x="800" y="78" font-size="10.5" fill="currentColor" opacity=".78">id_sensor  PK</text><text x="800" y="93" font-size="10.5" fill="currentColor" opacity=".78">modelo</text><text x="800" y="108" font-size="10.5" fill="currentColor" opacity=".78">protocolo</text></g><g><rect x="430" y="210" width="180" height="96" rx="7" fill="var(--card)" stroke="#1baf7a" stroke-width="1.5"/><path d="M430 235 H610" stroke="#1baf7a" stroke-width="1" opacity=".5"/><text x="440" y="227" font-size="11.5" font-weight="600" fill="#1baf7a">CONFIGURACAO_SAFRA</text><text x="440" y="248" font-size="10.5" fill="currentColor" opacity=".78">id_config  PK</text><text x="440" y="263" font-size="10.5" fill="currentColor" opacity=".78">id_regiao  FK</text><text x="440" y="278" font-size="10.5" fill="currentColor" opacity=".78">id_solo  FK</text><text x="440" y="293" font-size="10.5" fill="currentColor" opacity=".78">id_cultura  FK</text></g><g><rect x="40" y="270" width="175" height="96" rx="7" fill="var(--card)" stroke="#7b3fb8" stroke-width="1.5"/><path d="M40 295 H215" stroke="#7b3fb8" stroke-width="1" opacity=".5"/><text x="50" y="287" font-size="11.5" font-weight="600" fill="#7b3fb8">CLIMA_SEMANAL</text><text x="50" y="308" font-size="10.5" fill="currentColor" opacity=".78">id_clima_sem  PK</text><text x="50" y="323" font-size="10.5" fill="currentColor" opacity=".78">id_regiao  FK ★</text><text x="50" y="338" font-size="10.5" fill="currentColor" opacity=".78">periodo  UK</text><text x="50" y="353" font-size="10.5" fill="currentColor" opacity=".78">25 variáveis</text></g><g><rect x="235" y="270" width="165" height="81" rx="7" fill="var(--card)" stroke="#eb6834" stroke-width="1.5"/><path d="M235 295 H400" stroke="#eb6834" stroke-width="1" opacity=".5"/><text x="245" y="287" font-size="11.5" font-weight="600" fill="#eb6834">DADOS_CLIM_HIST</text><text x="245" y="308" font-size="10.5" fill="currentColor" opacity=".78">id_clima  PK</text><text x="245" y="323" font-size="10.5" fill="currentColor" opacity=".78">id_regiao  FK</text><text x="245" y="338" font-size="10.5" fill="currentColor" opacity=".78">ano_mes</text></g><g><rect x="790" y="390" width="155" height="96" rx="7" fill="var(--card)" stroke="#1baf7a" stroke-width="1.5"/><path d="M790 415 H945" stroke="#1baf7a" stroke-width="1" opacity=".5"/><text x="800" y="407" font-size="11.5" font-weight="600" fill="#1baf7a">LEITURA_IOT</text><text x="800" y="428" font-size="10.5" fill="currentColor" opacity=".78">id_leitura  PK</text><text x="800" y="443" font-size="10.5" fill="currentColor" opacity=".78">id_config  FK</text><text x="800" y="458" font-size="10.5" fill="currentColor" opacity=".78">id_sensor  FK</text><text x="800" y="473" font-size="10.5" fill="currentColor" opacity=".78">temp, umidade</text></g><g><rect x="40" y="430" width="195" height="96" rx="7" fill="var(--card)" stroke="#eb6834" stroke-width="1.5"/><path d="M40 455 H235" stroke="#eb6834" stroke-width="1" opacity=".5"/><text x="50" y="447" font-size="11.5" font-weight="600" fill="#eb6834">PRODUTIVIDADE_OBS</text><text x="50" y="468" font-size="10.5" fill="currentColor" opacity=".78">id_produtiv.  PK</text><text x="50" y="483" font-size="10.5" fill="currentColor" opacity=".78">cod_municipio</text><text x="50" y="498" font-size="10.5" fill="currentColor" opacity=".78">cultura, safra ★</text><text x="50" y="513" font-size="10.5" fill="currentColor" opacity=".78">rendimento</text></g><g><rect x="265" y="430" width="160" height="96" rx="7" fill="var(--card)" stroke="#7b3fb8" stroke-width="1.5"/><path d="M265 455 H425" stroke="#7b3fb8" stroke-width="1" opacity=".5"/><text x="275" y="447" font-size="11.5" font-weight="600" fill="#7b3fb8">BASE_MODELO</text><text x="275" y="468" font-size="10.5" fill="currentColor" opacity=".78">cod_municipio</text><text x="275" y="483" font-size="10.5" fill="currentColor" opacity=".78">cultura, ano</text><text x="275" y="498" font-size="10.5" fill="currentColor" opacity=".78">por estádio</text><text x="275" y="513" font-size="10.5" fill="currentColor" opacity=".78">rendimento</text></g>
+<rect x="28" y="418" width="410" height="120" rx="10" fill="none" stroke="#9a3412" stroke-width="1.2" stroke-dasharray="6 5" opacity=".7"/>
+<text x="233" y="553" text-anchor="middle" font-size="10" fill="#9a3412" opacity=".9">sem chave estrangeira — o grão é município, e REGIAO é estação</text>
+</g></svg>
+    </div>
+    <figcaption>As oito tabelas atuais mais <code>CLIMA_SEMANAL</code> e
+    <code>BASE_MODELO</code>. <code>PRODUTIVIDADE_OBSERVADA</code> e
+    <code>BASE_MODELO</code> aparecem sem ligação porque não têm chave estrangeira — é
+    uma lacuna real do desenho, tratada na seção 03.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <div class="sechead"><span class="num">01</span><div><h2>As três zonas</h2></div></div>
+  <p>O banco tem três grupos com funções diferentes, e misturá-los na leitura é o que
+  faz o DER parecer confuso.</p>
+  <div class="tw"><table>
+    <thead><tr><th>tabela</th><th>zona</th><th class="n">linhas</th><th>papel</th></tr></thead>
+    <tbody>
+      <tr><td class="k">TIPO_SOLO</td><td><span class="tag t-ref">referência</span></td><td class="n">10</td>
+        <td>Catálogo pedológico com os cinco atributos que o modelo consome</td></tr>
+      <tr><td class="k">CULTURA</td><td><span class="tag t-ref">referência</span></td><td class="n">3</td>
+        <td>Milho 120 d, Soja 115 d, Trigo 130 d</td></tr>
+      <tr><td class="k">REGIAO</td><td><span class="tag t-ref">referência</span></td><td class="n">181</td>
+        <td>Estação meteorológica do INMET, não município — a distinção importa</td></tr>
+      <tr><td class="k">SENSOR_IOT</td><td><span class="tag t-iot">IoT</span></td><td class="n">1</td>
+        <td>O ESP32 em campo</td></tr>
+      <tr><td class="k">CONFIGURACAO_SAFRA</td><td><span class="tag t-iot">IoT</span></td><td class="n">1</td>
+        <td>Amarra região, solo e cultura para dar contexto à leitura</td></tr>
+      <tr><td class="k">LEITURA_IOT</td><td><span class="tag t-iot">IoT</span></td><td class="n">718</td>
+        <td>Temperatura e umidade do sensor, a cada 5 segundos</td></tr>
+      <tr><td class="k">DADOS_CLIMATICOS_HISTORICOS</td><td><span class="tag t-fato">fatos</span></td><td class="n">5.456</td>
+        <td>Clima <strong>mensal</strong> — versão anterior, mantida como registro</td></tr>
+      <tr><td class="k">CLIMA_SEMANAL</td><td><span class="tag t-novo">migração</span></td><td class="n">47.022</td>
+        <td>Clima semanal por estação, o que o modelo de fato usa</td></tr>
+      <tr><td class="k">PRODUTIVIDADE_OBSERVADA</td><td><span class="tag t-fato">fatos</span></td><td class="n">32.979</td>
+        <td>Rendimento da PAM/IBGE, com o ano corrigido</td></tr>
+      <tr><td class="k">BASE_MODELO</td><td><span class="tag t-novo">migração</span></td><td class="n">1.460</td>
+        <td>Tabela analítica desnormalizada: uma linha por município × cultura × safra</td></tr>
+    </tbody></table></div>
+</section>
+
+<section>
+  <div class="sechead"><span class="num">02</span><div><h2>O caminho de uma previsão</h2></div></div>
+  <p>Onde cada tabela entra quando a calculadora responde a um produtor.</p>
+  <figure>
+    <svg viewBox="0 0 860 300" role="img" aria-label="Fluxo: estação do INMET e PAM do IBGE alimentam a base do modelo, que o Elastic Net consome para devolver a estimativa ao produtor">
+      <defs>
+        <marker id="seta" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+      <g font-family="IBM Plex Mono, monospace" font-size="11.5" fill="currentColor">
+        <rect x="20" y="30" width="170" height="54" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+        <text x="105" y="52" text-anchor="middle">CLIMA_SEMANAL</text>
+        <text x="105" y="70" text-anchor="middle" font-size="10.5" opacity=".62">47.022 · por estação</text>
+
+        <rect x="20" y="128" width="170" height="54" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+        <text x="105" y="150" text-anchor="middle">TIPO_SOLO</text>
+        <text x="105" y="168" text-anchor="middle" font-size="10.5" opacity=".62">via REGIAO.id_solo</text>
+
+        <rect x="20" y="226" width="170" height="54" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+        <text x="105" y="248" text-anchor="middle">PRODUTIVIDADE</text>
+        <text x="105" y="266" text-anchor="middle" font-size="10.5" opacity=".62">32.979 · por município</text>
+
+        <rect x="300" y="110" width="170" height="90" rx="7" fill="none" stroke="currentColor" stroke-width="1.3"/>
+        <text x="385" y="142" text-anchor="middle">BASE_MODELO</text>
+        <text x="385" y="160" text-anchor="middle" font-size="10.5" opacity=".62">1.460 linhas</text>
+        <text x="385" y="177" text-anchor="middle" font-size="10.5" opacity=".62">por estádio fenológico</text>
+
+        <rect x="575" y="110" width="160" height="90" rx="7" fill="none" stroke="#2a78d6" stroke-width="2"/>
+        <text x="655" y="142" text-anchor="middle" fill="#2a78d6">ELASTIC NET</text>
+        <text x="655" y="160" text-anchor="middle" font-size="10.5" fill="#2a78d6" opacity=".78">55 coeficientes</text>
+        <text x="655" y="177" text-anchor="middle" font-size="10.5" fill="#2a78d6" opacity=".78">M1 · M2 · M3</text>
+
+        <path d="M190 57 L250 57 L250 140 L298 140" fill="none" stroke="currentColor" stroke-width="1.2" marker-end="url(#seta)"/>
+        <path d="M190 155 L298 155" fill="none" stroke="currentColor" stroke-width="1.2" marker-end="url(#seta)"/>
+        <path d="M190 253 L250 253 L250 172 L298 172" fill="none" stroke="currentColor" stroke-width="1.2" marker-end="url(#seta)"/>
+        <path d="M470 155 L573 155" fill="none" stroke="#2a78d6" stroke-width="1.6" marker-end="url(#seta)"/>
+        <text x="521" y="147" text-anchor="middle" font-size="10" fill="#2a78d6">treina e prevê</text>
+
+        <path d="M655 110 L655 62" fill="none" stroke="currentColor" stroke-width="1.2" marker-end="url(#seta)"/>
+        <text x="655" y="48" text-anchor="middle" font-size="11">sacas/ha · faixa · risco</text>
+        <text x="655" y="30" text-anchor="middle" font-size="10.5" opacity=".62">para o produtor</text>
+
+        <rect x="575" y="226" width="160" height="54" rx="7" fill="none" stroke="#1baf7a" stroke-width="1.3" stroke-dasharray="5 4"/>
+        <text x="655" y="248" text-anchor="middle" fill="#1baf7a">LEITURA_IOT</text>
+        <text x="655" y="266" text-anchor="middle" font-size="10.5" fill="#1baf7a" opacity=".75">prova de conceito</text>
+        <path d="M655 226 L655 202" fill="none" stroke="#1baf7a" stroke-width="1.2" stroke-dasharray="4 3"/>
+        <text x="760" y="252" font-size="10.5" fill="#1baf7a" opacity=".85">não alimenta</text>
+        <text x="760" y="267" font-size="10.5" fill="#1baf7a" opacity=".85">o modelo</text>
+      </g>
+    </svg>
+    <figcaption>A linha tracejada em verde é a diferença que o texto do TCC precisa
+    declarar: o sensor existe e registra, mas suas leituras não entram na previsão — são
+    uma hora de coleta num dia, não a série de cinco safras que o modelo consome.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <div class="sechead"><span class="num">03</span><div><h2>A lacuna do desenho</h2></div></div>
+  <div class="box av">
+    <h3>Falta a ponte estação → município</h3>
+    <p><code>REGIAO</code> é <strong>estação meteorológica</strong>; o rendimento da PAM é
+    <strong>por município</strong>. São grãos diferentes, e não há tabela que os ligue —
+    por isso <code>PRODUTIVIDADE_OBSERVADA</code> e <code>BASE_MODELO</code> aparecem sem
+    chave estrangeira no diagrama.</p>
+    <p>Essa ponte existe, mas vive fora do banco: é a aba <code>ponte_municipio</code> do
+    <code>df_tcc_modelo.xlsx</code>, com o método de casamento (exato, abreviação ou
+    aproximado) e o escore de cada linha. Trazê-la para uma tabela
+    <code>PONTE_ESTACAO_MUNICIPIO</code> fecharia a integridade referencial e colocaria no
+    banco a resposta para a pergunta que a banca vai fazer sobre como o cruzamento foi
+    feito.</p>
+  </div>
+  <p>Com essa tabela o diagrama fecha: <code>REGIAO</code> → ponte → município →
+  <code>PRODUTIVIDADE_OBSERVADA</code> e <code>BASE_MODELO</code>, e nenhuma entidade fica
+  solta.</p>
+</section>
+
+<section>
+  <div class="sechead"><span class="num">04</span><div><h2>Integridade implementada</h2></div></div>
+  <div class="tw"><table>
+    <thead><tr><th>restrição</th><th>de</th><th>para</th></tr></thead>
+    <tbody>
+      <tr><td class="k">fk_config_regiao</td><td>CONFIGURACAO_SAFRA.id_regiao</td><td>REGIAO.id_regiao</td></tr>
+      <tr><td class="k">fk_config_solo</td><td>CONFIGURACAO_SAFRA.id_solo</td><td>TIPO_SOLO.id_solo</td></tr>
+      <tr><td class="k">fk_config_cultura</td><td>CONFIGURACAO_SAFRA.id_cultura</td><td>CULTURA.id_cultura</td></tr>
+      <tr><td class="k">fk_leitura_config</td><td>LEITURA_IOT.id_config</td><td>CONFIGURACAO_SAFRA.id_config</td></tr>
+      <tr><td class="k">fk_leitura_sensor</td><td>LEITURA_IOT.id_sensor</td><td>SENSOR_IOT.id_sensor</td></tr>
+      <tr><td class="k">fk_clima_regiao</td><td>DADOS_CLIMATICOS_HISTORICOS.id_regiao</td><td>REGIAO.id_regiao</td></tr>
+      <tr><td class="k">fk_clima_sem_regiao <span class="tag t-novo">novo</span></td><td>CLIMA_SEMANAL.id_regiao</td><td>REGIAO.id_regiao</td></tr>
+      <tr><td class="k">fk_regiao_solo <span class="tag t-novo">novo</span></td><td>REGIAO.id_solo</td><td>TIPO_SOLO.id_solo</td></tr>
+    </tbody></table></div>
+  <h3>Chaves únicas</h3>
+  <ul>
+    <li><code>CLIMA_SEMANAL (id_regiao, periodo)</code> — impede a mesma semana entrar duas vezes</li>
+    <li><code>PRODUTIVIDADE_OBSERVADA (cod_municipio_ibge, cultura_tcc, safra)</code> —
+      impede a duplicação que existe hoje na tabela</li>
+    <li><code>CULTURA (nome_cultura)</code> e <code>TIPO_SOLO (nome_solo)</code></li>
+  </ul>
+  <div class="box ok">
+    <p><strong>O que muda de fato com a migração.</strong> A coluna <code>safra</code> sai
+    de <code>VARCHAR(20)</code> contendo <code>'112'</code> — que é o código da variável no
+    SIDRA, não um ano — para <code>SMALLINT UNSIGNED</code> com os anos reais. É a
+    restrição de domínio que o TC1.1 promete na seção 3.4.2 e que hoje não existe: com
+    <code>VARCHAR</code>, qualquer coisa entra.</p>
+  </div>
+</section>
+
+<footer>
+  <p>MySQL 5.7.32 · servidor DBaaS. Contagens do inventário de 07/10/2026. As entidades
+  marcadas como migração entram com <code>migrar_banco.py</code>, que não altera
+  <code>SENSOR_IOT</code>, <code>LEITURA_IOT</code> nem <code>CONFIGURACAO_SAFRA</code>.</p>
+</footer>
+</div>
+</body></html>

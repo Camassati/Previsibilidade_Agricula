@@ -1,0 +1,160 @@
+==============================================================================
+RESULTADOS — Calculadora Agrícola (TCC)
+Gerado de res_final.json, robustez.xlsx, coef_final.json e robustez.json.
+Nenhum valor transcrito à mão.
+==============================================================================
+
+
+1. CONJUNTO DE DADOS
+------------------------------------------------------------------------------
+linhas na base do modelo : 920
+municípios               : 145
+UFs                      : MT, PR, RS, SP
+safras                   : 2020 a 2024
+culturas                 : soja, milho, trigo
+hiperparâmetros do M3    : alpha=0.01, l1_ratio=0.95
+tempo de resposta medido : 0.3546 ms (chamada completa da calculadora)
+
+
+2. DESEMPENHO — TODAS AS CONFIGURAÇÕES
+------------------------------------------------------------------------------
+esquema|momento|variáveis|modelo                        RMSE     MAE      R2     n
+espacial|M1_vegetativo|com_hist|elastic_net            20.55   14.09   0.584   920
+espacial|M1_vegetativo|com_hist|arvore                 22.45   15.48   0.503   920
+espacial|M1_vegetativo|com_hist|random_forest          19.39   12.99   0.629   920
+espacial|M1_vegetativo|so_clima|elastic_net            27.37   20.43   0.261   920
+espacial|M1_vegetativo|so_clima|arvore                 29.95   21.72   0.115   920
+espacial|M1_vegetativo|so_clima|random_forest          24.66   18.03   0.400   920
+espacial|M2_floracao|com_hist|elastic_net              20.34   13.89   0.592   920
+espacial|M2_floracao|com_hist|arvore                   22.75   15.72   0.490   920
+espacial|M2_floracao|com_hist|random_forest            19.09   12.60   0.641   920
+espacial|M2_floracao|so_clima|elastic_net              26.98   19.97   0.282   920
+espacial|M2_floracao|so_clima|arvore                   27.74   19.93   0.241   920
+espacial|M2_floracao|so_clima|random_forest            23.38   16.72   0.461   920
+espacial|M3_completo|com_hist|elastic_net              19.46   13.32   0.627   920
+espacial|M3_completo|com_hist|arvore                   22.66   15.40   0.494   920
+espacial|M3_completo|com_hist|random_forest            19.09   12.70   0.641   920
+espacial|M3_completo|so_clima|elastic_net              24.38   17.98   0.414   920
+espacial|M3_completo|so_clima|arvore                   23.95   17.18   0.435   920
+espacial|M3_completo|so_clima|random_forest            20.69   14.59   0.578   920
+espacial|tradicional|com_hist|media_historica          21.50   14.25   0.544   920
+temporal|M1_vegetativo|com_hist|elastic_net            21.37   15.30   0.531   811
+temporal|M1_vegetativo|com_hist|arvore                 23.48   16.76   0.434   811
+temporal|M1_vegetativo|com_hist|random_forest          21.48   15.11   0.527   811
+temporal|M1_vegetativo|so_clima|elastic_net            29.33   23.00   0.117   811
+temporal|M1_vegetativo|so_clima|arvore                 31.90   24.68  -0.044   811
+temporal|M1_vegetativo|so_clima|random_forest          29.03   22.31   0.135   811
+temporal|M2_floracao|com_hist|elastic_net              23.32   16.68   0.442   811
+temporal|M2_floracao|com_hist|arvore                   24.24   17.37   0.397   811
+temporal|M2_floracao|com_hist|random_forest            21.50   14.96   0.526   811
+temporal|M2_floracao|so_clima|elastic_net              33.50   26.21  -0.151   811
+temporal|M2_floracao|so_clima|arvore                   31.49   24.00  -0.017   811
+temporal|M2_floracao|so_clima|random_forest            29.56   22.13   0.103   811
+temporal|M3_completo|com_hist|elastic_net              22.47   16.07   0.482   811
+temporal|M3_completo|com_hist|arvore                   23.86   16.79   0.416   811
+temporal|M3_completo|com_hist|random_forest            21.75   15.15   0.515   811
+temporal|M3_completo|so_clima|elastic_net              29.98   23.42   0.078   811
+temporal|M3_completo|so_clima|arvore                   27.99   20.26   0.196   811
+temporal|M3_completo|so_clima|random_forest            25.51   18.58   0.332   811
+temporal|tradicional|com_hist|media_historica          21.22   13.89   0.538   811
+
+
+3. LINHA DE BASE JUSTA (esquema espacial)
+------------------------------------------------------------------------------
+  média histórica do município               RMSE  21.505
+  média histórica INDEXADA pelo ano          RMSE  20.060
+  Elastic Net M3 (espacial)                  RMSE  19.456
+  Random Forest M3 (espacial)                RMSE  19.085
+
+  ganho do EN sobre a média histórica : +9.5%
+  ganho do EN sobre a média indexada  : +3.0%
+  EN no esquema temporal vs tradicional: -5.9%
+
+
+4. SAFRA DE QUEBRA — soja/RS/2022
+------------------------------------------------------------------------------
+  realizado: 31.6 sacas/ha em 30 municípios
+  média histórica              previu   51.98   RMSE  24.312
+  média INDEXADA pelo ano      previu   31.62   RMSE  12.304
+  Elastic Net — espacial       previu   37.62   RMSE  13.551
+  Elastic Net — temporal       previu   69.31   RMSE  41.776
+
+
+5. ANOMALIA CLIMÁTICA — por quartil
+------------------------------------------------------------------------------
+faixa            n   z mediano   MAE trad    MAE EN   ganho %
+1 normal       189       0.707     12.694    14.775    -16.39
+2              187       0.780     13.811    16.365    -18.49
+3              188       1.106     15.210    17.277    -13.59
+4 anômalo      188       1.320     14.778    16.765    -13.45
+
+  Leitura: o modelo NÃO tem vantagem nos quartis de maior anomalia.
+
+
+6. COEFICIENTES DO M3 (55 variáveis, 12 zeradas pela penalização)
+------------------------------------------------------------------------------
+  base_hist                                 +113.692
+  enchimento_temp_max_abs                    -78.271
+  enchimento_graus_dia_acum                  +32.934
+  enchimento_amplitude_termica               +29.980
+  vegetativo_vpd_medio_kpa                   -26.790
+  vegetativo_graus_dia_acum                  +22.591
+  vegetativo_amplitude_termica               +22.497
+  floracao_temp_min_abs                      +20.164
+  enchimento_vpd_medio_kpa                   +16.291
+  vegetativo_precipitacao_total_mm           +13.847
+  enchimento_umidade_min_abs                 +12.223
+  enchimento_vpd_max_kpa                     -12.151
+  floracao_temp_media                        -12.097
+  vegetativo_temp_media                      -11.044
+  enchimento_cobertura                       -10.993
+  floracao_dias_com_chuva                     -9.937
+  floracao_vpd_max_kpa                        +9.128
+  floracao_vento_rajada_max                   +8.804
+  floracao_dias_secos_acumulados              -8.433
+  vegetativo_temp_min_abs                     -8.319
+  enchimento_umidade_media                    -8.040
+  floracao_temp_max_abs                       -7.764
+  enchimento_vento_medio                      +7.055
+  vegetativo_cobertura                        -6.939
+  vegetativo_radiacao_total_mjm2              -6.567
+  floracao_umidade_min_abs                    +6.130
+  enchimento_temp_min_abs                     +6.114
+  floracao_amplitude_termica                  -5.408
+  floracao_vento_medio                        -5.292
+  floracao_radiacao_total_mjm2                -4.944
+  enchimento_maior_veranico                   +4.627
+  vegetativo_vento_rajada_max                 -4.122
+  vegetativo_maior_veranico                   -3.831
+  floracao_precipitacao_total_mm              +2.703
+  floracao_vpd_medio_kpa                      -2.470
+  vegetativo_vpd_max_kpa                      -2.303
+  vegetativo_umidade_min_abs                  +2.089
+  enchimento_dias_secos_acumulados            +1.796
+  vegetativo_dias_com_chuva                   -1.745
+  enchimento_radiacao_total_mjm2              -0.786
+  floracao_maior_veranico                     +0.702
+  vegetativo_vento_medio                      +0.260
+  enchimento_precipitacao_total_mm            +0.021
+
+  zeradas (12): vegetativo_dias_secos_acumulados, vegetativo_temp_max_abs, vegetativo_umidade_media, vegetativo_pressao_media, floracao_graus_dia_acum, floracao_umidade_media, floracao_pressao_media, floracao_cobertura, enchimento_dias_com_chuva, enchimento_temp_media, enchimento_pressao_media, enchimento_vento_rajada_max
+
+
+7. TESE QUE OS NÚMEROS SUSTENTAM
+------------------------------------------------------------------------------
+  O clima do ciclo, agregado por estádio fenológico, melhora a estimativa
+  quando NÃO há histórico do município (esquema espacial). O ganho sobre o
+  método tradicional ingênuo é de ~9,5%; sobre a linha de base bem
+  especificada (média indexada pelo ano) cai para ~3,0%.
+
+  Em previsão de safra ainda não iniciada (esquema temporal) o modelo PERDE
+  para o método tradicional. Cinco safras não bastam para aprender a dinâmica
+  interanual: há 145 municípios para generalizar no espaço, mas apenas quatro
+  transições de safra para generalizar no tempo.
+
+  O maior coeficiente do modelo não é climático: é base_hist, a média
+  histórica do próprio município. O modelo aprende primeiro ONDE está, e só
+  depois COMO foi o ano.
+
+  Conclusão delimitada: a ferramenta serve para acompanhar a safra em curso,
+  não para projetar safras futuras.

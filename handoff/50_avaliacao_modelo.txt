@@ -1,0 +1,165 @@
+AVALIAÇÃO DO MODELO — TEXTO CORRIGIDO
+Substitui integralmente o trecho atual sobre avaliação do modelo.
+Conferido contra modelagem_exante_expost.ipynb e df_tcc_modelo.xlsx.
+
+======================================================================
+TEXTO PARA O TCC
+======================================================================
+
+A avaliação do modelo é conduzida com o apoio de Inteligência Artificial e
+de procedimentos estatísticos padronizados, organizados em quatro frentes
+complementares, capazes de responder objetivamente se o modelo está apto a
+substituir o método de estimativa hoje empregado pelo produtor.
+
+Na primeira frente, a qualidade da previsão é medida por três métricas
+estatísticas: o erro quadrático médio (RMSE), que penaliza com maior peso os
+erros grandes; o erro absoluto médio (MAE), de leitura direta na mesma
+unidade do rendimento, em sacas por hectare; e o coeficiente de determinação
+(R²), que indica a fração da variabilidade do rendimento explicada pelas
+variáveis do modelo. Quanto menor o RMSE e o MAE, e quanto mais próximo de 1
+o R², melhor o desempenho preditivo. Registra-se, contudo, que essas três
+métricas descrevem o erro do modelo isoladamente e não autorizam, por si,
+qualquer conclusão sobre utilidade prática — questão tratada na quarta
+frente.
+
+Na segunda frente, o diagnóstico de ajuste é realizado por validação cruzada
+com cinco partições. A divisão não é aleatória: as partições são formadas
+por município, de modo que todas as observações de um mesmo município
+permaneçam inteiramente em treino ou inteiramente em teste. Essa restrição é
+necessária porque o rendimento de um município é fortemente determinado pelo
+seu próprio patamar histórico; em uma divisão aleatória, o modelo
+reencontraria no teste municípios que já viu no treino e exibiria um
+desempenho que não se reproduz diante de um município novo. O procedimento
+responde, portanto, a uma pergunta precisa: o modelo funciona onde não há
+histórico disponível?
+
+Essa mesma frente contempla um segundo esquema de validação, de natureza
+temporal, em que o modelo é treinado com as safras passadas e testado na
+safra seguinte, reproduzindo a condição real de uso — prever antes de
+colher. Os dois esquemas respondem a perguntas distintas e podem conduzir a
+conclusões distintas, razão pela qual ambos são reportados, e não apenas o
+mais favorável.
+
+A comparação entre o desempenho em treino e em teste permite identificar com
+clareza dois problemas: o sobreajuste, quando o modelo memoriza os dados de
+treino e perde capacidade de generalizar, e o subajuste, quando o modelo é
+simples demais para capturar o padrão. Os hiperparâmetros do Elastic Net
+(alpha e l1_ratio) são selecionados por busca em grade, procedimento em que
+diferentes configurações são testadas por validação cruzada e é escolhida
+aquela que entrega o melhor equilíbrio entre ajuste e generalização. A busca
+dos hiperparâmetros ocorre dentro de cada partição de treino, e nunca sobre
+o conjunto de teste, de modo que a estimativa de erro final permaneça livre
+de contaminação. Com os hiperparâmetros definidos, o modelo final é avaliado
+no conjunto de teste, e a IA auxilia na leitura desse diagnóstico.
+
+Na terceira frente, o Elastic Net determina o peso de cada variável de
+entrada sobre o resultado durante o treinamento, e a IA auxilia na análise
+desses pesos. Por se tratar de um modelo linear regularizado, os
+coeficientes ajustados mostram diretamente a contribuição de cada variável
+para a previsão. Coeficientes reduzidos a zero pela penalização indicam
+variáveis descartadas pelo próprio ajuste; coeficientes com sinais coerentes
+com a literatura agronômica funcionam como validação adicional de que o
+modelo aprendeu uma relação fisicamente plausível, e não ruído.
+
+A leitura dos coeficientes deve observar a hierarquia entre eles. O maior
+peso do modelo não recai sobre uma variável climática, e sim sobre a média
+histórica de rendimento do próprio município, o que indica que o modelo
+aprende primeiro a posição produtiva da localidade e só então o efeito do
+ano. Entre as variáveis climáticas, destacam-se as associadas ao estádio de
+enchimento de grãos, com sinal negativo para os extremos de temperatura
+máxima e positivo para o acúmulo de graus-dia. Essa hierarquia é um
+resultado do trabalho, e não uma limitação: ela delimita com precisão a
+contribuição efetiva do clima sobre aquilo que o histórico já explica.
+
+Na quarta frente, o desempenho do modelo é confrontado com o de métodos de
+estimativa tradicionais, estabelecidos como linha de base. Essa comparação é
+a que responde à pergunta central do trabalho, uma vez que um erro baixo em
+termos absolutos não implica vantagem sobre o procedimento já praticado. São
+adotadas duas linhas de base. A primeira é a média histórica de rendimento
+do município, calculada apenas sobre as safras anteriores à que está sendo
+prevista, de modo a não incorporar informação futura. A segunda, mais
+exigente, corrige essa média por um fator anual estimado a partir dos demais
+municípios da mesma unidade federativa, representando o produtor que conhece
+o seu histórico e acompanha o comportamento da safra na sua região.
+
+O modelo é considerado apto quando apresenta erro inferior ao das duas
+linhas de base, no esquema de validação correspondente ao uso pretendido.
+Quando o ganho se verifica em um esquema e não no outro, o escopo de
+aplicação do modelo é delimitado de acordo, e essa delimitação é declarada
+como resultado.
+
+Em conjunto, as quatro análises permitem afirmar com rigor metodológico se o
+modelo está apto a ser utilizado pelo produtor rural, em que condições, ou
+se ainda exige refinamento antes de gerar previsões confiáveis. As
+interpretações apoiadas por IA são conferidas pelos autores, a quem cabe a
+decisão final de incorporar o modelo à calculadora.
+
+======================================================================
+O QUE MUDOU, E POR QUÊ
+======================================================================
+
+1. "variabilidade da rentabilidade" -> "variabilidade do rendimento"
+   O alvo do modelo é rendimento em sacas por hectare. Rentabilidade é a
+   conversão feita depois pela calculadora, com preço e custo.
+
+2. "validação cruzada k-fold (k=5) ... dividido em cinco partes"
+   -> partições formadas por município.
+   O código usa GroupKFold por município, não KFold aleatório. A diferença
+   é metodologicamente decisiva e favorece vocês: sem o agrupamento haveria
+   vazamento, porque o mesmo município apareceria em treino e teste.
+   Descrever como k-fold comum entrega de graça uma crítica que não cabe.
+
+3. Acrescentado o esquema temporal.
+   O notebook avalia dois esquemas — espacial (município novo) e temporal
+   (próxima safra). O texto original descrevia apenas um.
+
+4. Acrescentada a frase sobre a busca de hiperparâmetros ocorrer dentro de
+   cada partição de treino.
+   É o que o código faz, e é a diferença entre validação cruzada aninhada e
+   a versão ingênua que superestima o desempenho.
+
+5. REMOVIDO: "as variáveis categóricas, como tipo de solo e cultura, são
+   codificadas em variáveis binárias e recebem um coeficiente por
+   categoria."
+   Essa afirmação é falsa contra o código. Não há OneHotEncoder nem
+   get_dummies em nenhuma célula do notebook. Além disso, as cinco colunas
+   de solo (retencao_agua, drenagem, aptidao_graos, profundidade,
+   risco_erosao) NÃO existem em df_tcc_modelo.xlsx: a lista COLUNAS_SOLO
+   está declarada, mas o filtro "[c for c in COLUNAS_SOLO if c in
+   df.columns]" devolve vazio e as variáveis desaparecem sem erro. O solo
+   nunca entrou no modelo.
+   DECISÃO PENDENTE DO GRUPO: ou se retira a menção à EMBRAPA entre as
+   fontes de dados do modelo, ou se corrige o pipeline para que o solo
+   efetivamente entre. As duas saídas são legítimas; manter o texto como
+   está não é.
+
+6. "quanto a temperatura e a umidade contribuem" -> hierarquia dos
+   coeficientes, com a média histórica do município em primeiro lugar.
+   É o que os coeficientes mostram. Declarar isso é mais forte do que
+   omitir, porque delimita o que o clima acrescenta sobre o histórico.
+
+7. REMOVIDO: "Essa validação só terá valor de evidência quando o modelo for
+   treinado com a base histórica real (INMET, IBGE e EMBRAPA)."
+   O treinamento com a base real já foi executado. A frase descrevia um
+   estado anterior do trabalho.
+
+8. ACRESCENTADA a quarta frente: comparação contra linhas de base.
+   Esta é a lacuna mais séria do texto original. RMSE, MAE e R² medem o erro
+   do modelo, mas não respondem se ele é melhor do que o método que o
+   produtor já usa — e prever sempre a média histórica do município também
+   produz um RMSE, frequentemente bom. Sem essa frente, a avaliação não
+   sustenta a conclusão que o trabalho precisa defender.
+
+======================================================================
+A CONFERIR ANTES DE COLAR NO TCC
+======================================================================
+
+- O trecho sobre a hierarquia dos coeficientes descreve o resultado obtido
+  na base atual. Se o modelo for retreinado, reler.
+
+- A quarta frente foi redigida em termos de critério ("o modelo é
+  considerado apto quando..."), sem números. Os valores medidos entram na
+  seção de resultados, não aqui.
+
+- Verificar se a menção à EMBRAPA aparece em outros pontos do TC1.1. Se o
+  solo não voltar ao pipeline, todas as ocorrências precisam cair juntas.

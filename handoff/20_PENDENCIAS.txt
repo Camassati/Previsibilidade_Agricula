@@ -1,0 +1,108 @@
+================================================================================
+PENDÊNCIAS — o que falta, em ordem de risco
+================================================================================
+
+
+--------------------------------------------------------------------------------
+BLOQUEIA A ENTREGA
+--------------------------------------------------------------------------------
+
+[ ] Rodar a migração do banco.
+    migrar_banco.py está escrito, testado em ensaio e nunca aplicado. Enquanto
+    não rodar, CLIMA_SEMANAL e PONTE_ESTACAO_MUNICIPIO não existem, e os textos
+    que as descrevem estão descrevendo um projeto.
+        python migrar_banco.py            (ensaio — confira a saída)
+        python migrar_banco.py --aplicar  (grava)
+    Faz backup de PRODUTIVIDADE_OBSERVADA e de DADOS_CLIMATICOS_HISTORICOS
+    antes de substituir. Protege SENSOR_IOT, LEITURA_IOT e CONFIGURACAO_SAFRA.
+
+[ ] Decidir o que fazer com o solo.
+    O TC1.1 cita EMBRAPA como fonte e descreve codificação categórica de solo.
+    Nenhuma das duas coisas existe no código. Duas saídas legítimas:
+      (a) tirar a menção à EMBRAPA de TODAS as ocorrências (resumo, abstract,
+          introdução, 3.1) e declarar o modelo como climático;
+      (b) levar as 5 colunas de solo até df_tcc_modelo.xlsx e retreinar — o que
+          muda todos os números do Capítulo 4 e todas as figuras.
+    Manter como está não é opção: é verificável e falso.
+
+[ ] Trocar a senha do banco.
+    Foi colada em chat. Depois de trocar, só o banco_config.ini local precisa
+    saber da nova. Esse arquivo não vai para o GitHub nem anexo ao TCC.
+
+[ ] Atualizar resultados.html.
+    A manchete ainda diz +9,5% e a seção da seca ainda mostra o resultado do
+    esquema espacial. É a página que o professor abre.
+
+
+--------------------------------------------------------------------------------
+PRECISA DE DADO QUE SÓ O AUTOR TEM
+--------------------------------------------------------------------------------
+
+[ ] CPFs dos cinco autores na declaração de IA (seção 1, identificação).
+
+[ ] Identificador do modelo e datas das sessões de Claude Code, na ficha
+    técnica da declaração. Estão marcados [Confirmar].
+
+[ ] Portabilidade do coletor de dados — marcada [Confirmar] no Quadro 1.
+
+[ ] SELECT * FROM TIPO_SOLO.
+    A calculadora oferece 3 solos no seletor, que são os únicos com atributos
+    completos (vieram das estações). O catálogo tem 10. Com o dump, o seletor
+    passa a oferecer todos.
+
+[ ] Exportar as leituras reais do sensor.
+        python exportar_sensor.py
+    A página publicada está mostrando uma AMOSTRA SINTÉTICA, rotulada como tal
+    na tela. Substituir sensor.json remove o rótulo automaticamente.
+
+
+--------------------------------------------------------------------------------
+MELHORA O TRABALHO, NÃO BLOQUEIA
+--------------------------------------------------------------------------------
+
+[ ] Regerar o DER (der_banco.jpg). Foi feito antes da PONTE_ESTACAO_MUNICIPIO
+    e mostra 10 entidades; o modelo tem 11.
+
+[ ] Corrigir o ETL na raiz para agrupar por ano ISO em vez de ano civil.
+    Hoje a correção das semanas partidas está na carga, não na origem. Se
+    reexecutar o ETL, o defeito volta. São 3 linhas em 47 mil, todas de
+    cobertura baixa — mexer regera a base e muda pouquíssimo os números.
+
+[ ] Apagar ou renomear etl_tcc_semanal.txt. É um dump anterior às correções e
+    mostra o VPD calculado da forma errada. Quem abrir achando que é o código
+    atual tira conclusão errada.
+
+[ ] Coletar do SIDRA as variáveis de produção e área colhida.
+    Hoje só a 112 (rendimento) é coletada. Com área, a linha de base da UF
+    poderia ser ponderada por área em vez de média simples — comparação mais
+    justa ainda.
+
+[ ] Corrigir frequencia_amostragem_min no banco. O valor é 5 e as leituras
+    estão a 5 segundos. Ou gravar 0.083, ou renomear a coluna para
+    frequencia_amostragem_s. A calculadora já exibe a divergência.
+
+[ ] Resolver o descasamento CULTURA x PRODUTIVIDADE_OBSERVADA.
+    'Milho' contra 'Milho (em grão)'. Hoje as duas tabelas não se juntam.
+
+[ ] RNF02 do TC1.1 diz Python 3.8+. O código exige 3.9+ (pandas 2.x,
+    scikit-learn 1.5+). Corrigir o texto.
+
+[ ] Verificar se as validações de domínio do DHT22 foram escritas como CHECK.
+    MySQL 5.7 aceita a sintaxe e ignora. Se for o caso, a afirmação da seção
+    3.4.3 do TC1.1 é falsa, e a validação precisa ir para a aplicação.
+
+
+--------------------------------------------------------------------------------
+CAPÍTULOS DO TCC — ESTADO
+--------------------------------------------------------------------------------
+3.1  reescrita pronta em secoes_revisadas.docx, falta inserir no TCC
+3.4  reescrita pronta em secoes_revisadas.docx, falta inserir no TCC
+     (os quadros de tipos das 6 entidades pré-existentes ainda não foram
+      preenchidos; o banco_inventario.txt já tem os dados para isso)
+3.2.3 avaliação do modelo: texto corrigido em avaliacao_modelo_corrigido.txt,
+     falta colar. Inclui uma quarta frente (comparação contra linhas de base)
+     que o texto original não tinha.
+4    Capítulo completo em resultados_tcc.docx, pronto para inserir.
+     Substitui o antigo "4 RESULTADOS ESPERADOS", cujos números eram
+     hipotéticos (RMSE 2,45 / R² 0,86) e não têm relação com os medidos.
+5    Conclusão: não foi escrita.

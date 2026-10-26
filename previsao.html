@@ -1,0 +1,764 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Previsão de Colheita</title>
+<style>
+:root{
+  --fundo:#f6f5f1; --cartao:#ffffff; --tinta:#1c2119; --sec:#4f5649; --mudo:#858c7c;
+  --linha:#e0ded6; --linha2:#eeece5; --modelo:#2a78d6; --faixa:#cfe0f5;
+  --ok:#1f8a4c; --okf:#e7f4ec; --alerta:#b4501f; --alertaf:#fbefe7; --trad:#7d8575;
+  --real:#1c2119; --erro:#a3271f; --errof:#fbeceb;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --fundo:#151814; --cartao:#1e221c; --tinta:#eceee8; --sec:#c3c8bb; --mudo:#8e9686;
+    --linha:#343a31; --linha2:#2a2f27; --modelo:#5b9cf0; --faixa:#26405f;
+    --ok:#5cc28a; --okf:#1d3326; --alerta:#e08a5a; --alertaf:#3a271c; --trad:#9aa291;
+    --real:#eceee8; --erro:#f08a82; --errof:#3a1f1d;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--fundo);color:var(--tinta);
+  font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{padding:22px 20px 0;max-width:1080px;margin:0 auto}
+h1{font-size:22px;margin:0 0 2px;font-weight:650;letter-spacing:-.01em}
+.sub{color:var(--mudo);font-size:13.5px}
+main{max-width:1080px;margin:0 auto;padding:14px 20px 40px}
+.selo{border-radius:10px;padding:11px 14px;margin:14px 0 4px;font-size:13.5px;border:1px solid}
+.selo.ok{background:var(--okf);border-color:var(--ok);color:var(--tinta)}
+.selo.ruim{background:var(--errof);border-color:var(--erro)}
+.selo b{font-weight:650}
+nav{display:flex;gap:4px;border-bottom:1px solid var(--linha);margin:18px 0 18px;flex-wrap:wrap}
+nav button{background:none;border:0;padding:10px 14px;font:inherit;color:var(--sec);
+  cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-1px}
+nav button[aria-selected="true"]{color:var(--tinta);border-color:var(--modelo);font-weight:600}
+.aba{display:none}.aba.ativa{display:block}
+.cartao{background:var(--cartao);border:1px solid var(--linha);border-radius:12px;padding:18px;margin-bottom:16px}
+.cartao h2{font-size:17px;margin:0 0 4px;font-weight:620}
+.cartao h3{font-size:14px;margin:16px 0 8px;font-weight:620;color:var(--sec)}
+.grade{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin:12px 0}
+.kpi{border:1px solid var(--linha);border-left:3px solid var(--modelo);border-radius:9px;padding:11px 13px}
+.kpi .r{font-size:12px;color:var(--mudo)}
+.kpi .v{font-size:23px;font-weight:650;font-variant-numeric:tabular-nums}
+.kpi .d{font-size:12.5px;color:var(--sec)}
+.kpi.ok{border-left-color:var(--ok)}.kpi.trad{border-left-color:var(--trad)}.kpi.al{border-left-color:var(--alerta)}
+.form{display:flex;gap:10px;flex-wrap:wrap;align-items:end}
+.form label{display:flex;flex-direction:column;font-size:12.5px;color:var(--mudo);gap:4px}
+select{font:inherit;padding:7px 9px;border:1px solid var(--linha);border-radius:8px;
+  background:var(--cartao);color:var(--tinta);min-width:150px}
+select#sel-mun{min-width:260px}
+table{width:100%;border-collapse:collapse;font-size:13.5px;font-variant-numeric:tabular-nums}
+th{text-align:left;font-weight:600;color:var(--mudo);font-size:11.5px;text-transform:uppercase;
+  letter-spacing:.05em;padding:7px 8px;border-bottom:1px solid var(--linha)}
+td{padding:7px 8px;border-bottom:1px solid var(--linha2)}
+td.n,th.n{text-align:right}
+.aviso{background:var(--alertaf);border-left:3px solid var(--alerta);border-radius:0 8px 8px 0;
+  padding:10px 13px;font-size:13.5px;margin:10px 0}
+.nota{font-size:12.5px;color:var(--mudo);margin-top:10px}
+.tag{display:inline-block;font-size:11.5px;padding:1px 7px;border-radius:999px;border:1px solid var(--linha);color:var(--sec)}
+.duas{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media (max-width:760px){.duas{grid-template-columns:1fr}}
+svg text{fill:var(--sec);font-size:11px}
+.erro{color:var(--erro)}
+ul.motivos{margin:6px 0 0;padding-left:18px}
+ul.motivos li{margin:2px 0}
+code{font-size:12.5px}
+.pilula{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;padding:3px 11px;
+  border-radius:999px;border:1px solid}
+.pilula::before{content:"";width:8px;height:8px;border-radius:50%;background:currentColor}
+.pilula.ao_vivo{color:var(--ok);background:var(--okf);border-color:var(--ok)}
+.pilula.ao_vivo::before{animation:pulso 1.6s ease-in-out infinite}
+.pilula.atrasado{color:var(--alerta);background:var(--alertaf);border-color:var(--alerta)}
+.pilula.parado,.pilula.sem_leituras{color:var(--erro);background:var(--errof);border-color:var(--erro)}
+@keyframes pulso{50%{opacity:.25}}
+@media (prefers-reduced-motion: reduce){.pilula.ao_vivo::before{animation:none}}
+.graf{position:relative}
+.graf svg{width:100%;height:auto;display:block}
+.dica{position:absolute;pointer-events:none;background:var(--cartao);border:1px solid var(--linha);
+  border-radius:8px;padding:5px 9px;font-size:12.5px;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.12);display:none}
+.botao2{font:inherit;padding:7px 14px;border:1px solid var(--linha);border-radius:8px;background:var(--cartao);
+  color:var(--tinta);cursor:pointer}
+</style>
+</head>
+<body>
+<header>
+  <h1>Previsão de Colheita</h1>
+  <div class="sub">Calculadora Agrícola · TCC UNIP 2026 · dados lidos do banco <code>tcc2026</code> em modo somente leitura</div>
+</header>
+<main>
+  <div id="selo" class="selo">Carregando…</div>
+
+  <nav role="tablist">
+    <button role="tab" aria-selected="true" data-aba="calc">Calculadora</button>
+    <button role="tab" aria-selected="false" data-aba="cfg">Safras cadastradas</button>
+    <button role="tab" aria-selected="false" data-aba="prev">Previsão por município</button>
+    <button role="tab" aria-selected="false" data-aba="des">Desempenho do modelo</button>
+    <button role="tab" aria-selected="false" data-aba="sensor">Sensor ao vivo</button>
+  </nav>
+
+  <section id="aba-calc" class="aba ativa">
+    <div class="cartao">
+      <h2>Quanto vou colher?</h2>
+      <div class="sub">Escolha o grão, o município, o solo, a área e a data de plantio. O clima vem sempre do
+        sensor (LEITURA_IOT): a média de cada mês sobre todos os registros do mês, encaixada nos estádios do ciclo.</div>
+      <div class="form" style="margin-top:12px">
+        <label>Grão<select id="c-cult"></select></label>
+        <label>Município<select id="c-mun"></select></label>
+        <label>Tipo de solo<select id="c-solo" required><option value="" disabled selected>— escolha o solo —</option></select></label>
+        <label>Área<input id="c-area" type="number" min="0" step="any" value="10000"
+          style="font:inherit;padding:7px 9px;border:1px solid var(--linha);border-radius:8px;width:130px;background:var(--cartao);color:var(--tinta)"></label>
+        <label>Unidade<select id="c-un"><option value="m2">m²</option><option value="ha">hectares</option></select></label>
+        <label>Plantio<input id="c-plantio" type="date" value="2026-09-21"
+          style="font:inherit;padding:6px 9px;border:1px solid var(--linha);border-radius:8px;background:var(--cartao);color:var(--tinta)"></label>
+        <label style="flex-direction:row;align-items:center;gap:6px;color:var(--sec)"><input type="checkbox" id="c-raso"> solo raso (&lt; 50 cm)</label>
+        <label style="flex-direction:row;align-items:center;gap:6px;color:var(--sec)"><input type="checkbox" id="c-pedregoso"> muito pedregoso (&gt; 15% de pedras)</label>
+        <button id="c-btn" style="font:inherit;padding:8px 18px;border:0;border-radius:8px;background:var(--modelo);color:#fff;cursor:pointer;font-weight:600">Calcular</button>
+      </div>
+    </div>
+    <div id="calc"></div>
+  </section>
+
+  <section id="aba-cfg" class="aba"><div id="cfg">Carregando…</div></section>
+
+  <section id="aba-prev" class="aba">
+    <div class="cartao">
+      <h2>Previsão de rendimento para uma safra da base</h2>
+      <div class="sub">O modelo estima o rendimento médio do município a partir do clima de cada estádio do ciclo.
+        As safras disponíveis são as que passaram pelos filtros do treino (cobertura do ciclo ≥ 80% e faixa plausível de rendimento).</div>
+      <div class="form" style="margin-top:12px">
+        <label>Cultura<select id="sel-cult"></select></label>
+        <label>Município<select id="sel-mun"></select></label>
+        <label>Safra<select id="sel-safra"></select></label>
+      </div>
+    </div>
+    <div id="prev"></div>
+  </section>
+
+  <section id="aba-des" class="aba"><div id="des">Carregando…</div></section>
+
+  <section id="aba-sensor" class="aba">
+    <div class="cartao">
+      <div style="display:flex;justify-content:space-between;align-items:start;gap:12px;flex-wrap:wrap">
+        <div>
+          <h2>Sensor ao vivo</h2>
+          <div class="sub">Leituras do nó sensor (DHT22) direto da tabela <code>LEITURA_IOT</code>, só leitura.
+            A página consulta o banco a cada 5 s enquanto esta aba está aberta e busca só as leituras novas.</div>
+        </div>
+        <div class="form">
+          <label>Janela<select id="s-janela" style="min-width:120px">
+            <option value="15">15 min</option><option value="60" selected>1 hora</option>
+            <option value="360">6 horas</option><option value="1440">24 horas</option></select></label>
+          <button type="button" id="s-pausa" class="botao2">Pausar</button>
+        </div>
+      </div>
+      <div id="s-status" style="margin-top:12px">Conectando…</div>
+    </div>
+    <div id="sensor"></div>
+  </section>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+const fmt = (v, c = 1) => v == null ? "—" : Number(v).toLocaleString("pt-BR", {minimumFractionDigits: c, maximumFractionDigits: c});
+const dataBR = s => s ? s.split("-").reverse().join("/") : "—";
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const MOM = {M1: "M1 · vegetativo", M2: "M2 · até a floração", M3: "M3 · ciclo completo"};
+
+async function api(rota) {
+  const r = await fetch(rota, {cache: "no-store"});
+  const j = await r.json();
+  if (!r.ok) throw new Error(j.erro || r.statusText);
+  return j;
+}
+
+document.querySelectorAll("nav button").forEach(b => b.onclick = () => {
+  document.querySelectorAll("nav button").forEach(x => x.setAttribute("aria-selected", x === b));
+  document.querySelectorAll(".aba").forEach(a => a.classList.toggle("ativa", a.id === "aba-" + b.dataset.aba));
+});
+
+/* ------------------------------------------------------------- selo ---- */
+async function carregarEstado() {
+  const e = await api("/api/estado");
+  const s = $("#selo");
+  if (e.erro_banco || e.erro_modelo) {
+    s.className = "selo ruim";
+    s.innerHTML = `<b>Não consegui carregar.</b> ${esc(e.erro_banco || "")} ${esc(e.erro_modelo || "")}
+      <button type="button" id="tentar-de-novo">Tentar de novo</button>`;
+    $("#tentar-de-novo").onclick = async ev => {
+      ev.target.disabled = true;
+      ev.target.textContent = "Lendo o banco…";
+      try { await api("/api/recarregar"); } catch (_) {}
+      location.reload();
+    };
+    return e;
+  }
+  const t = e.trava;
+  if (t && t.ok) {
+    s.className = "selo ok";
+    s.innerHTML = `<b>Conferido:</b> as ${t.linhas_banco_filtradas} safras que o banco entrega depois dos filtros são exatamente as
+      ${t.linhas_modelo} do modelo, com as mesmas variáveis, o mesmo realizado e a mesma média histórica
+      (maior diferença na previsão M3: ${fmt(t.maior_diferenca_previsao_m3, 4)} sc/ha). Lido em ${esc(e.carregado_em.replace("T", " "))}.`;
+  } else if (t) {
+    s.className = "selo ruim";
+    s.innerHTML = `<b>Divergência entre o banco e o modelo — não use os números abaixo sem conferir.</b>
+      Banco: ${t.linhas_banco_filtradas} safras · modelo: ${t.linhas_modelo} · ausentes no banco: ${t.faltam_no_banco} ·
+      sobrando: ${t.sobram_no_banco} · realizado divergente: ${t.divergencias_realizado} ·
+      média histórica divergente: ${t.divergencias_base_hist} · variáveis divergentes: ${t.divergencias_variaveis} ·
+      maior diferença na previsão M3: ${fmt(t.maior_diferenca_previsao_m3, 3)} sc/ha.`;
+  }
+  return e;
+}
+
+/* --------------------------------------------------- gráficos (SVG) ---- */
+function svgProgressao(p) {
+  const W = 520, H = 230, L = 46, R = 16, T = 14, B = 34;
+  const ms = ["M1", "M2", "M3"];
+  const vals = ms.flatMap(m => [p.momentos[m].faixa.p10, p.momentos[m].faixa.p90]).concat([p.realizado, p.tradicional]);
+  let lo = Math.min(...vals), hi = Math.max(...vals); const pad = (hi - lo) * .12 || 5; lo = Math.max(0, lo - pad); hi += pad;
+  const x = i => L + i * (W - L - R) / 2, y = v => T + (hi - v) * (H - T - B) / (hi - lo);
+  const poly = (a, b) => ms.map((m, i) => `${x(i)},${y(p.momentos[m].faixa[a])}`).join(" ") + " " +
+    ms.slice().reverse().map((m, i) => `${x(2 - i)},${y(p.momentos[m].faixa[b])}`).join(" ");
+  let g = "";
+  const passos = 4;
+  for (let k = 0; k <= passos; k++) {
+    const v = lo + (hi - lo) * k / passos;
+    g += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" stroke="var(--linha2)"/>
+          <text x="${L - 6}" y="${y(v) + 4}" text-anchor="end">${fmt(v, 0)}</text>`;
+  }
+  g += `<polygon points="${poly("p10", "p90")}" fill="var(--faixa)" opacity=".55"/>
+        <polygon points="${poly("p25", "p75")}" fill="var(--faixa)"/>`;
+  g += `<line x1="${L}" x2="${W - R}" y1="${y(p.tradicional)}" y2="${y(p.tradicional)}" stroke="var(--trad)" stroke-dasharray="5 4" stroke-width="1.6"/>
+        <line x1="${L}" x2="${W - R}" y1="${y(p.realizado)}" y2="${y(p.realizado)}" stroke="var(--real)" stroke-width="1.8"/>`;
+  g += `<polyline points="${ms.map((m, i) => `${x(i)},${y(p.momentos[m].previsto)}`).join(" ")}" fill="none" stroke="var(--modelo)" stroke-width="2.4"/>`;
+  ms.forEach((m, i) => {
+    g += `<circle cx="${x(i)}" cy="${y(p.momentos[m].previsto)}" r="5" fill="var(--modelo)" stroke="var(--cartao)" stroke-width="2"/>
+          <text x="${x(i)}" y="${H - 12}" text-anchor="middle">${m}</text>`;
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Previsão ao longo do ciclo">${g}</svg>
+    <div class="nota"><span style="color:var(--modelo)">●</span> previsão do modelo ·
+      <span style="color:var(--real)">━</span> realizado (IBGE) ·
+      <span style="color:var(--trad)">┅</span> média histórica (método tradicional) ·
+      faixa: erros reais do modelo fora da amostra, 25–75% e 10–90%</div>`;
+}
+
+function rotuloVar(v) {
+  if (v === "base_hist") return "histórico do município";
+  const est = {vegetativo: "vegetativo", floracao: "floração", enchimento: "enchimento"};
+  for (const k in est) if (v.startsWith(k + "_")) return est[k] + " · " + v.slice(k.length + 1).replaceAll("_", " ");
+  return v.replaceAll("_", " ");
+}
+
+function svgContrib(lista) {
+  const W = 520, linha = 22, L = 230, R = 50, H = lista.length * linha + 10;
+  const m = Math.max(...lista.map(c => Math.abs(c.contribuicao))) || 1;
+  const zero = L + (W - L - R) / 2, esc_ = (W - L - R) / 2 / m;
+  let g = `<line x1="${zero}" x2="${zero}" y1="0" y2="${H}" stroke="var(--linha)"/>`;
+  lista.forEach((c, i) => {
+    const v = c.contribuicao, yy = 6 + i * linha, w = Math.abs(v) * esc_;
+    const x0 = v >= 0 ? zero : zero - w;
+    g += `<text x="${L - 8}" y="${yy + 12}" text-anchor="end">${esc(rotuloVar(c.variavel))}</text>
+          <rect x="${x0}" y="${yy + 2}" width="${Math.max(w, 1)}" height="14" rx="2" fill="${v >= 0 ? "var(--ok)" : "var(--alerta)"}"/>
+          <text x="${v >= 0 ? x0 + w + 4 : x0 - 4}" y="${yy + 13}" text-anchor="${v >= 0 ? "start" : "end"}">${v >= 0 ? "+" : "−"}${fmt(Math.abs(v), 1)}</text>`;
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:600px;display:block" role="img" aria-label="Contribuição das variáveis">${g}</svg>`;
+}
+
+function svgHistorico(hist, destaque) {
+  if (!hist.length) return `<div class="nota">Sem rendimento do IBGE para este município e cultura.</div>`;
+  const W = 520, H = 170, L = 36, R = 8, T = 10, B = 26;
+  const hi = Math.max(...hist.map(h => h.sacas_ha)) * 1.15;
+  const bw = (W - L - R) / hist.length;
+  let g = "";
+  hist.forEach((h, i) => {
+    const hh = (H - T - B) * h.sacas_ha / hi, xx = L + i * bw + bw * .15;
+    g += `<rect x="${xx}" y="${H - B - hh}" width="${bw * .7}" height="${hh}" rx="2"
+            fill="${h.safra === destaque ? "var(--real)" : "var(--trad)"}" opacity="${h.safra === destaque ? 1 : .55}"/>
+          <text x="${xx + bw * .35}" y="${H - 9}" text-anchor="middle">${h.safra}</text>
+          <text x="${xx + bw * .35}" y="${H - B - hh - 4}" text-anchor="middle">${fmt(h.sacas_ha, 0)}</text>`;
+  });
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="max-width:560px;display:block" role="img" aria-label="Rendimento do município por safra">${g}</svg>`;
+}
+
+/* ------------------------------------------------------- calculadora ---- */
+function prepararCalculadora() {
+  const sc = $("#c-cult");
+  sc.innerHTML = Object.keys(OPC).map(c => `<option>${esc(c)}</option>`).join("");
+  const trocaCult = () => {
+    const muns = OPC[sc.value] || [];
+    $("#c-mun").innerHTML = muns.map((m, i) => `<option value="${i}">${esc(m.nome)} / ${esc(m.uf)}</option>`).join("");
+    trocaMun();
+  };
+  const trocaMun = () => {};
+  sc.onchange = () => { trocaCult(); montarSolos(); }; $("#c-mun").onchange = trocaMun;
+  $("#c-btn").onclick = calcularProdutor;
+  trocaCult();
+  api("/api/solos").then(r => { SOLOS = r.solos; montarSolos(); }).catch(() => {});
+}
+
+let SOLOS = [];
+function montarSolos() {
+  const cult = $("#c-cult").value, atual = $("#c-solo").value;
+  $("#c-solo").innerHTML = `<option value="" disabled>— escolha o solo —</option>` + SOLOS.map(s => {
+    const r = (s.por_cultura || {})[cult] || {situacao: "sem_regra", ajuste_pct: 0};
+    const bloq = r.situacao === "nao_indicado" || r.situacao === "sem_regra";
+    const extra = r.situacao === "sem_regra" ? " — sem regra cadastrada" : r.situacao === "nao_indicado" ? " — não indicado (ZARC)" : (r.ajuste_pct ? ` — ajuste ${r.ajuste_pct > 0 ? "+" : ""}${fmt(r.ajuste_pct, 0)}%` : (r.situacao === "aviso" ? " — atenção" : ""));
+    return `<option value="${s.id_solo}" ${bloq ? "disabled" : ""}>${esc(s.nome_solo)}${extra}</option>`;
+  }).join("");
+  const op = [...$("#c-solo").options].find(o => o.value === atual && !o.disabled);
+  $("#c-solo").value = op ? atual : "";
+}
+
+async function calcularProdutor() {
+  if (!$("#c-solo").value) {
+    $("#calc").innerHTML = `<div class="cartao"><div class="selo ruim"><b>Escolha o tipo de solo.</b>
+      Ele é obrigatório: cada solo tem a sua regra para cada grão (ajuste ou bloqueio).</div></div>`;
+    $("#c-solo").focus();
+    return;
+  }
+  const cult = $("#c-cult").value, m = OPC[cult][+$("#c-mun").value];
+  const ps = new URLSearchParams({m: m.cod, c: cult, area: $("#c-area").value, unidade: $("#c-un").value,
+    solo: $("#c-solo").value, plantio: $("#c-plantio").value,
+    raso: $("#c-raso").checked ? 1 : 0, pedregoso: $("#c-pedregoso").checked ? 1 : 0});
+  const alvo = $("#calc");
+  alvo.innerHTML = `<div class="cartao">Calculando…</div>`;
+  try {
+    const r = await api("/api/calcular?" + ps);
+    if (r.bloqueado) {
+      alvo.innerHTML = `<div class="cartao"><h2>${esc(r.cultura)} · ${esc(r.municipio)} / ${esc(r.uf)}</h2>
+        <div class="selo ruim"><b>Cultivo não indicado neste terreno — a estimativa não é calculada.</b>
+          <ul class="motivos">${r.motivos.map(m => `<li>${esc(m)}</li>`).join("")}</ul>
+          <div class="nota">Fonte: ${esc(r.fonte)}</div></div></div>`;
+      return;
+    }
+    if (r.sem_dados) {
+      alvo.innerHTML = `<div class="cartao"><h2>${esc(r.cultura)} · ${esc(r.municipio)} / ${esc(r.uf)}</h2>
+        <div class="selo ruim"><b>Sem registros do sensor dentro deste ciclo.</b> ${esc(r.motivo)}.
+        O sensor tem ${r.sensor.leituras} registros, de ${esc(String(r.sensor.primeira || "—").replace("T", " ").slice(0, 16))}
+        a ${esc(String(r.sensor.ultima || "—").replace("T", " ").slice(0, 16))}.</div></div>`;
+      return;
+    }
+    const e = r.estimativa, f = r.faixa, t = r.tradicional, aj = r.ajuste_solo, em = r.estimativa_modelo;
+    const NM = {vegetativo: "Vegetativo", floracao: "Floração", enchimento: "Enchimento"};
+    const tabMensal = `<h3>Clima de entrada: média mensal do sensor (todos os registros do mês, dentro do ciclo)</h3>
+      <table><tr><th>Mês</th><th class="n">Registros</th><th class="n">Dias</th><th class="n">Temp. média</th><th class="n">Máx.</th>
+        <th class="n">Mín.</th><th class="n">Umid. média</th><th class="n">Umid. mín.</th><th class="n">VPD médio</th><th class="n">Amplitude diária</th></tr>
+      ${r.mensal.map(m => `<tr><td>${esc(m.mes)}</td><td class="n">${m.leituras}</td><td class="n">${m.dias}</td>
+        <td class="n">${fmt(m.temp_media)} °C</td><td class="n">${fmt(m.temp_max)}</td><td class="n">${fmt(m.temp_min)}</td>
+        <td class="n">${fmt(m.umidade_media)}%</td><td class="n">${fmt(m.umidade_min)}%</td><td class="n">${fmt(m.vpd_medio, 2)} kPa</td>
+        <td class="n">${fmt(m.amplitude_media)} °C</td></tr>`).join("")}</table>
+      <div class="nota">Estádios: ${Object.entries(r.estadios).map(([k, v]) =>
+        `${NM[k]} ${dataBR(v.inicio)} a ${dataBR(v.fim)} — ${v.meses.length ? "meses " + v.meses.join(", ") : "sem registro"}`).join(" · ")}.
+        Modelo usado: ${r.momento}.</div>`;
+    const area = r.unidade === "m2" ? `${fmt(r.area_informada, 0)} m² (${fmt(r.hectares, 4)} ha)` : `${fmt(r.hectares, 2)} ha`;
+    const s = r.solo;
+    alvo.innerHTML = `<div class="cartao">
+      <h2>${esc(r.cultura)} · ${esc(r.municipio)} / ${esc(r.uf)} · ${area}</h2>
+      <div class="sub">${esc(r.clima)}</div>
+      <div class="grade">
+        <div class="kpi"><div class="r">Produtividade estimada${aj.pct ? " (com ajuste de solo)" : ""}</div><div class="v">${fmt(e.sacas_ha)} <span style="font-size:13px">sc/ha</span></div>
+          <div class="d">faixa provável ${fmt(f.p25.sacas_ha)} a ${fmt(f.p75.sacas_ha)} sc/ha</div></div>
+        ${aj.pct ? `<div class="kpi al"><div class="r">Modelo, sem ajuste de solo</div><div class="v">${fmt(em.sacas_ha)} <span style="font-size:13px">sc/ha</span></div>
+          <div class="d">ajuste de solo ${aj.pct > 0 ? "+" : ""}${fmt(aj.pct, 0)}% · ${aj.fonte ? "fonte: " + esc(aj.fonte) : "<b>sem fonte</b>"}</div></div>` : ""}
+        <div class="kpi ok"><div class="r">Produção na sua área</div><div class="v">${fmt(e.sacas, e.sacas < 100 ? 1 : 0)} <span style="font-size:13px">sacas</span></div>
+          <div class="d">${fmt(e.toneladas, 2)} t · faixa ${fmt(f.p25.sacas, e.sacas < 100 ? 1 : 0)} a ${fmt(f.p75.sacas, e.sacas < 100 ? 1 : 0)} sacas</div></div>
+        <div class="kpi trad"><div class="r">Método tradicional</div><div class="v">${fmt(t.sacas_ha)} <span style="font-size:13px">sc/ha</span></div>
+          <div class="d">${esc(r.origem_tradicional)} · ${fmt(t.sacas, e.sacas < 100 ? 1 : 0)} sacas</div></div>
+        ${r.colheita ? `<div class="kpi"><div class="r">Colheita estimada</div><div class="v">${dataBR(r.colheita)}</div>
+          <div class="d">plantio + ${r.ciclo_dias} dias (regra de calendário)</div></div>` : ""}
+        ${r.realizado ? `<div class="kpi ok"><div class="r">Realizado nessa safra (IBGE)</div><div class="v">${fmt(r.realizado.sacas_ha)} <span style="font-size:13px">sc/ha</span></div>
+          <div class="d">${fmt(r.realizado.sacas, e.sacas < 100 ? 1 : 0)} sacas na sua área</div></div>` : ""}
+      </div>
+      <table><tr><th>Cenário</th><th class="n">sc/ha</th><th class="n">Sacas na área</th><th class="n">Toneladas</th></tr>
+        ${[["Pessimista (10%)", f.p10], ["Provável baixo (25%)", f.p25], ["Central", e], ["Provável alto (75%)", f.p75], ["Otimista (90%)", f.p90]]
+          .map(([n, v]) => `<tr${n === "Central" ? ' style="font-weight:600"' : ""}><td>${n}</td><td class="n">${fmt(v.sacas_ha)}</td>
+            <td class="n">${fmt(v.sacas, e.sacas < 100 ? 1 : 0)}</td><td class="n">${fmt(v.toneladas, 2)}</td></tr>`).join("")}</table>
+      ${s ? `<h3>Solo informado: ${esc(s.nome_solo)}</h3><div class="nota" style="margin-top:0">${esc(s.descricao || "")}
+        Retenção de água ${s.retencao_agua}/5 · drenagem ${s.drenagem}/5 · aptidão para grãos ${s.aptidao_graos}/5 ·
+        profundidade ${s.profundidade}/5 · risco de erosão ${s.risco_erosao}/5.
+        ${aj.pct ? `<b>Ajuste aplicado depois do modelo: ${aj.pct > 0 ? "+" : ""}${fmt(aj.pct, 0)}%.</b>` : "<b>Sem ajuste para este solo nesta cultura</b> (o modelo não usa solo)."}
+        Atributos 1–5 da tabela TIPO_SOLO, sem fonte cadastrada.</div>` : ""}
+      ${tabMensal}
+      <h3>O que pesa nesta estimativa (sc/ha)</h3>${svgContrib(r.contribuicoes)}
+      <div class="aviso"><b>Leia antes de usar:</b><ul class="motivos">${r.avisos.map(a => `<li>${esc(a)}</li>`).join("")}</ul></div>
+      <div class="nota">1 saca = 60 kg. A estimativa é a produtividade média do município; uma lavoura individual varia mais que a média.</div>
+    </div>`;
+  } catch (err) { alvo.innerHTML = `<div class="cartao erro">Erro: ${esc(err.message)}</div>`; }
+}
+
+/* ---------------------------------------------------- sensor (IoT) ---- */
+const NOME_EST = {vegetativo: "Vegetativo", floracao: "Floração", enchimento: "Enchimento"};
+const VAR_SENSOR = [
+  ["temp_media", "Temperatura média", "°C", 1], ["temp_max_abs", "Temperatura máxima", "°C", 1],
+  ["temp_min_abs", "Temperatura mínima", "°C", 1], ["amplitude_termica", "Amplitude térmica diária", "°C", 1],
+  ["graus_dia_acum", "Graus-dia do estádio (projetado)", "°C·dia", 0], ["umidade_media", "Umidade média", "%", 1],
+  ["umidade_min_abs", "Umidade mínima", "%", 1], ["vpd_medio_kpa", "VPD médio", "kPa", 2],
+  ["vpd_max_kpa", "VPD máximo", "kPa", 2], ["cobertura", "Cobertura do estádio", "", 3]];
+
+function blocoSensor(c) {
+  const s = c.sensor, p = c.previsao_sensor;
+  const dh = t => t ? t.replace("T", " ").slice(0, 16).split(" ").map((x, i) => i ? x : dataBR(x)).join(" ") : "—";
+  let h = `<h3>Leituras do sensor (LEITURA_IOT, configuração ${c.id_config})</h3>`;
+  if (!s.leituras) return h + `<div class="nota">Nenhuma leitura gravada para esta configuração.</div>`;
+  h += `<div class="nota" style="margin-top:0">${s.leituras} leituras, de ${dh(s.primeira)} a ${dh(s.ultima)},
+    intervalo mediano de ${fmt(s.intervalo_mediano_s, 0)} s${s.fora_do_ciclo ? ` · ${s.fora_do_ciclo} fora do ciclo (antes do plantio ou depois da colheita), ignoradas` : ""}.</div>`;
+  h += `<table><tr><th>Estádio</th><th>Período</th><th class="n">Leituras</th><th class="n">Horas</th>
+    <th class="n">Dias com leitura</th><th class="n">Dias ≥ 18 h</th><th class="n">Dias do estádio</th><th class="n">Cobertura</th></tr>
+    ${Object.entries(s.estadios).map(([k, e]) => `<tr><td>${NOME_EST[k]}</td><td>${dataBR(e.inicio)} a ${dataBR(e.fim)}</td>
+      <td class="n">${e.leituras}</td><td class="n">${e.horas_medidas}</td><td class="n">${e.dias_com_leitura}</td>
+      <td class="n">${e.dias_com_18h}</td><td class="n">${e.dias_do_estadio}</td>
+      <td class="n">${e.valores ? fmt(100 * e.valores.cobertura, 1) + "%" : "—"}</td></tr>`).join("")}</table>`;
+  const comDado = Object.entries(s.estadios).filter(([, e]) => e.valores);
+  if (comDado.length) {
+    const foraSet = new Set(p ? Object.values(p.momentos).flatMap(m => m.fora_da_faixa.map(f => f.variavel)) : []);
+    h += `<h3>O que entra no modelo vindo do sensor</h3><table><tr><th>Variável</th>
+      ${comDado.map(([k]) => `<th class="n">${NOME_EST[k]}</th>`).join("")}</tr>
+      ${VAR_SENSOR.map(([v, rot, un, cas]) => `<tr><td>${rot}${un ? ` (${un})` : ""}</td>
+        ${comDado.map(([k, e]) => `<td class="n">${fmt(e.valores[v], cas)}${foraSet.has(k + "_" + v) ? ` <span class="tag" title="fora da faixa vista no treino">fora da faixa</span>` : ""}</td>`).join("")}</tr>`).join("")}</table>`;
+  }
+  if (p && Object.keys(p.momentos).length) {
+    const ms = Object.entries(p.momentos);
+    h += `<h3>Estimativa do modelo com o que há</h3><div class="grade">
+      ${ms.map(([k, m]) => `<div class="kpi al"><div class="r">${MOM[k]} · com dados do sensor</div>
+        <div class="v">${fmt(m.previsto)} <span style="font-size:13px">sc/ha</span></div>
+        <div class="d">${m.faixa ? `faixa do treino ${fmt(m.faixa.p25)} a ${fmt(m.faixa.p75)} — não vale para esta cobertura` : "sem faixa para esta cultura"}</div></div>`).join("")}
+      <div class="kpi trad"><div class="r">Média histórica usada</div><div class="v">${fmt(p.base_hist)} <span style="font-size:13px">sc/ha</span></div>
+        <div class="d">${esc(p.base_hist_origem)}</div></div></div>
+      ${ms.map(([k, m]) => `<div class="nota">${k}: ${m.do_sensor.length} variáveis vieram do sensor;
+        ${m.imputadas.length} entraram com a mediana do treino. Maiores parcelas:
+        ${m.contribuicoes.slice(0, 4).map(x => `${esc(rotuloVar(x.variavel))} ${x.contribuicao >= 0 ? "+" : "−"}${fmt(Math.abs(x.contribuicao))}`).join(" · ")}.</div>`).join("")}`;
+  }
+  return h;
+}
+
+/* ------------------------------------------------ safras cadastradas ---- */
+async function carregarConfigs() {
+  const alvo = $("#cfg");
+  try {
+    const {configuracoes} = await api("/api/configuracoes");
+    if (!configuracoes.length) { alvo.innerHTML = `<div class="cartao">Nenhuma safra cadastrada em CONFIGURACAO_SAFRA.</div>`; return; }
+    alvo.innerHTML = configuracoes.map(c => {
+      const muns = c.municipios.map(m => esc(m.nome)).join(" e ") || "sem município na ponte";
+      const j = c.janela;
+      const janela = j ? `semanas ${j.semana_inicio} a ${j.semana_fim} (${esc(j.observacao)}) —
+          plantio na semana ${c.semana_plantio}: <b>${j.plantio_dentro ? "dentro" : "fora"}</b> da janela`
+        : "sem janela de treino para esta cultura nesta UF";
+      const hist = c.historico_pam;
+      const media = hist.length ? hist.reduce((a, h) => a + h.sacas_ha, 0) / hist.length : null;
+      const porMun = {};
+      hist.forEach(h => (porMun[h.cod] = porMun[h.cod] || []).push(h));
+      const graficos = Object.values(porMun).map(hs =>
+        `<h3>Rendimento do IBGE · ${esc(hs[0].municipio)} · ${esc(c.cultura_pam)}</h3>${svgHistorico(hs, null)}`).join("");
+      return `<div class="cartao">
+        <h2>${esc(c.cultura)} em ${muns} / ${esc(c.uf)} <span class="tag">configuração ${c.id_config}</span></h2>
+        <div class="sub">Estação ${esc(c.estacao)} (${esc(c.cod_estacao)}) · solo cadastrado: ${esc(c.solo || "—")}</div>
+        <div class="grade">
+          <div class="kpi"><div class="r">Plantio</div><div class="v">${dataBR(c.data_plantio)}</div><div class="d">semana ISO ${c.semana_plantio ?? "—"}</div></div>
+          <div class="kpi ok"><div class="r">Colheita estimada</div><div class="v">${dataBR(c.colheita_estimada)}</div>
+            <div class="d">plantio + ${c.ciclo_dias ?? "—"} dias (ciclo da tabela CULTURA)</div></div>
+          <div class="kpi trad"><div class="r">Média do IBGE no município</div><div class="v">${fmt(media, 1)} <span style="font-size:13px">sc/ha</span></div>
+            <div class="d">${hist.length} safras registradas${hist.length ? ` (${hist[0].safra}–${hist[hist.length - 1].safra})` : ""}</div></div>
+        </div>
+        ${blocoSensor(c)}
+        <div class="aviso"><b>Precisa de mais dados.</b> O que separa esta conta da conta com que o modelo foi treinado e validado:
+          <ul class="motivos">${c.avisos.map(m => `<li>${esc(m)}</li>`).join("")}</ul></div>
+        <div class="nota">Janela de ciclo usada no treino: ${janela}.<br>
+          A data de colheita é uma regra de calendário (plantio + ciclo estimado), não uma saída do modelo.
+          ${c.safras_na_base_do_modelo.length ? `Este município tem safras passadas na base do modelo (${c.safras_na_base_do_modelo.join(", ")}): veja a aba “Previsão por município”.` : ""}</div>
+        ${graficos}
+      </div>`;
+    }).join("");
+  } catch (e) { alvo.innerHTML = `<div class="cartao erro">Erro: ${esc(e.message)}</div>`; }
+}
+
+/* ---------------------------------------------- previsão por município -- */
+let OPC = null;
+async function carregarOpcoes() {
+  OPC = (await api("/api/opcoes")).culturas;
+  const sc = $("#sel-cult");
+  sc.innerHTML = Object.keys(OPC).map(c => `<option>${esc(c)}</option>`).join("");
+  sc.onchange = trocarCultura; $("#sel-mun").onchange = trocarMun; $("#sel-safra").onchange = calcular;
+  trocarCultura();
+  prepararCalculadora();
+}
+function trocarCultura() {
+  const muns = OPC[$("#sel-cult").value] || [];
+  $("#sel-mun").innerHTML = muns.map((m, i) => `<option value="${i}">${esc(m.nome)} / ${esc(m.uf)}</option>`).join("");
+  trocarMun();
+}
+function trocarMun() {
+  const m = OPC[$("#sel-cult").value][+$("#sel-mun").value];
+  $("#sel-safra").innerHTML = m.safras.map(s => `<option>${s}</option>`).join("");
+  $("#sel-safra").value = m.safras[m.safras.length - 1];
+  calcular();
+}
+async function calcular() {
+  const cult = $("#sel-cult").value, m = OPC[cult][+$("#sel-mun").value], s = $("#sel-safra").value;
+  const alvo = $("#prev");
+  alvo.innerHTML = `<div class="cartao">Calculando…</div>`;
+  try {
+    const p = await api(`/api/previsao?m=${m.cod}&c=${encodeURIComponent(cult)}&s=${s}`);
+    const m3 = p.momentos.M3, eM = m3.previsto - p.realizado, eT = p.tradicional - p.realizado;
+    const melhor = Math.abs(eM) < Math.abs(eT) ? "o modelo" : "a média histórica";
+    const imput = [...new Set(["M1", "M2", "M3"].flatMap(k => p.momentos[k].imputadas))];
+    const aus = [...new Set(["M1", "M2", "M3"].flatMap(k => p.momentos[k].ausentes))];
+    alvo.innerHTML = `<div class="cartao">
+      <h2>${esc(p.municipio)} / ${esc(p.uf)} · ${esc(p.cultura)} · safra ${p.safra}</h2>
+      <div class="sub">Cobertura do ciclo: ${fmt(100 * p.cobertura_ciclo, 0)}% (${p.semanas_validas} de ${p.semanas_esperadas} semanas com dado)</div>
+      <div class="grade">
+        <div class="kpi"><div class="r">Modelo · ciclo completo (M3)</div><div class="v">${fmt(m3.previsto)} <span style="font-size:13px">sc/ha</span></div>
+          <div class="d">faixa provável ${fmt(m3.faixa.p25)} a ${fmt(m3.faixa.p75)}</div></div>
+        <div class="kpi trad"><div class="r">Método tradicional</div><div class="v">${fmt(p.tradicional)} <span style="font-size:13px">sc/ha</span></div>
+          <div class="d">média das safras anteriores do município</div></div>
+        <div class="kpi ok"><div class="r">Realizado (IBGE)</div><div class="v">${fmt(p.realizado)} <span style="font-size:13px">sc/ha</span></div>
+          <div class="d">erro do modelo ${eM >= 0 ? "+" : "−"}${fmt(Math.abs(eM))} · tradicional ${eT >= 0 ? "+" : "−"}${fmt(Math.abs(eT))}</div></div>
+      </div>
+      <div class="nota">Nesta safra, ${melhor} chegou mais perto do realizado. Uma linha isolada não diz qual método é melhor — o desempenho no conjunto está na aba “Desempenho do modelo”.</div>
+      ${imput.length ? `<div class="aviso">Variáveis sem dado nesta safra, preenchidas com a mediana do treino (como na calculadora): ${imput.map(v => esc(rotuloVar(v))).join(", ")}.</div>` : ""}
+      ${aus.length ? `<div class="aviso">Colunas do modelo que não existem na BASE_MODELO: ${aus.map(esc).join(", ")}.</div>` : ""}
+      <div class="duas">
+        <div><h3>Estimativa ao longo do ciclo</h3>${svgProgressao(p)}
+          <table><tr><th>Momento</th><th class="n">Previsto</th><th class="n">Faixa 25–75%</th></tr>
+          ${["M1", "M2", "M3"].map(k => `<tr><td>${MOM[k]}</td><td class="n">${fmt(p.momentos[k].previsto)}</td>
+            <td class="n">${fmt(p.momentos[k].faixa.p25)} – ${fmt(p.momentos[k].faixa.p75)}</td></tr>`).join("")}</table></div>
+        <div><h3>O que pesa nesta estimativa (M3, sc/ha)</h3>${svgContrib(m3.contribuicoes)}
+          <div class="nota">Elastic Net é linear: a previsão é a soma destas parcelas mais o intercepto. Por isso dá para abrir variável a variável.</div></div>
+      </div>
+      <h3>Rendimento do IBGE neste município</h3>${svgHistorico(p.historico_pam, p.safra)}
+      <div class="nota">Esta é uma previsão feita com o clima do ciclo inteiro já medido, para uma safra já colhida — o uso em que o modelo foi validado.
+        Não é a previsão de uma safra futura.</div>
+    </div>`;
+  } catch (e) { alvo.innerHTML = `<div class="cartao erro">Erro: ${esc(e.message)}</div>`; }
+}
+
+/* ------------------------------------------------------- desempenho ---- */
+async function carregarDesempenho() {
+  const alvo = $("#des");
+  try {
+    const d = await api("/api/desempenho");
+    const ganho = (base, mod) => 100 * (base - mod) / base;
+    const gH = ganho(d.espacial.media_historica, d.espacial.elastic_net);
+    const gI = ganho(d.espacial.media_indexada, d.espacial.elastic_net);
+    const gT = ganho(d.temporal.media_historica, d.temporal.elastic_net);
+    const sinal = v => (v >= 0 ? "+" : "−") + fmt(Math.abs(v), 1) + "%";
+    const q = d.safra_de_quebra;
+    alvo.innerHTML = `<div class="cartao">
+      <h2>Onde o modelo ganha e onde perde</h2>
+      <div class="sub">RMSE em sacas por hectare — menor é melhor. Calculado agora a partir de ${esc(d.fonte)}.</div>
+      <div class="duas">
+        <div><h3>Município sem histórico (validação espacial, ${d.espacial.n} safras)</h3>
+          <table>
+            <tr><th>Método</th><th class="n">RMSE</th></tr>
+            <tr><td>Elastic Net (ciclo completo)</td><td class="n">${fmt(d.espacial.elastic_net, 2)}</td></tr>
+            <tr><td>Média histórica do município</td><td class="n">${fmt(d.espacial.media_historica, 2)}</td></tr>
+            <tr><td>Média histórica indexada pelo ano</td><td class="n">${fmt(d.espacial.media_indexada, 2)}</td></tr>
+          </table>
+          <div class="nota">Ganho do modelo: ${sinal(gH)} sobre a média histórica e ${sinal(gI)} sobre a média indexada pelo ano,
+            que é a comparação justa (ela também sabe como está o ano na região).</div></div>
+        <div><h3>Próxima safra (validação temporal, ${d.temporal.n} safras)</h3>
+          <table>
+            <tr><th>Método</th><th class="n">RMSE</th></tr>
+            <tr><td>Elastic Net (ciclo completo)</td><td class="n">${fmt(d.temporal.elastic_net, 2)}</td></tr>
+            <tr><td>Média histórica do município</td><td class="n">${fmt(d.temporal.media_historica, 2)}</td></tr>
+          </table>
+          <div class="nota">Diferença do modelo: ${sinal(gT)}. ${gT < 0 ? "Aqui o modelo <b>perde</b> para o método tradicional." : ""}
+            Por isso a página não mostra previsão de rendimento para safras futuras.</div></div>
+      </div>
+      <h3>Safra de quebra (aba 2_safra_de_quebra)</h3>
+      <table><tr>${Object.entries(q[0] || {}).map(([k, v]) => `<th class="${typeof v === "number" ? "n" : ""}">${esc(k)}</th>`).join("")}</tr>
+        ${q.map(r => `<tr>${Object.values(r).map(v => `<td class="${typeof v === "number" ? "n" : ""}">${typeof v === "number" ? fmt(v, 2) : esc(v)}</td>`).join("")}</tr>`).join("")}</table>
+      <div class="nota">Escopo que os números sustentam: a ferramenta serve para estimar a safra em curso quando o ciclo já foi medido,
+        e para municípios sem histórico; não serve para projetar safras futuras.</div>
+    </div>`;
+  } catch (e) { alvo.innerHTML = `<div class="cartao erro">Erro ao ler o desempenho: ${esc(e.message)}</div>`; }
+}
+
+/* ------------------------------------------------------ sensor ao vivo ---- */
+const SV = {ultimo: 0, leituras: [], janela: 60, timer: null, pausado: false, emCurso: false, ultimaResp: null};
+const INTERVALO_MS = 5000;
+const FALHA_GAP_S = 60;   // mesmo critério do diagnóstico: intervalo > 60 s é falha de coleta
+const hora = s => new Date(s.replace(" ", "T"));
+const hhmm = d => d.toLocaleTimeString("pt-BR", {hour: "2-digit", minute: "2-digit"});
+const hhmmss = s => s ? s.slice(11) : "—";
+const dataHoraBR = s => s ? `${dataBR(s.slice(0, 10))} ${s.slice(11)}` : "—";
+
+function fmtIdade(s) {
+  if (s == null) return "—";
+  if (s < 60) return `${s} s`;
+  if (s < 3600) return `${Math.floor(s / 60)} min ${s % 60} s`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ${Math.floor(s % 3600 / 60)} min`;
+  const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600);
+  return `${d} ${d === 1 ? "dia" : "dias"}${h ? ` e ${h} h` : ""}`;
+}
+
+function sensorVisivel() { return $("#aba-sensor").classList.contains("ativa") && !document.hidden; }
+
+function agendarSensor(ms = INTERVALO_MS) {
+  clearTimeout(SV.timer);
+  if (sensorVisivel() && !SV.pausado) SV.timer = setTimeout(() => consultarSensor(false), ms);
+}
+
+async function consultarSensor(reiniciar) {
+  if (SV.emCurso) { if (reiniciar) SV.reiniciarPendente = true; return; }
+  SV.emCurso = true;
+  if (SV.reiniciarPendente) { reiniciar = true; SV.reiniciarPendente = false; }
+  if (reiniciar) { SV.ultimo = 0; SV.leituras = []; }
+  let espera = INTERVALO_MS;
+  try {
+    const d = await api(`/api/sensor?desde=${SV.ultimo}&janela=${SV.janela}`);
+    SV.ultimaResp = d;
+    if (d.leituras.length) SV.leituras.push(...d.leituras);
+    const ultLida = d.leituras.length ? d.leituras[d.leituras.length - 1].id : 0;
+    SV.ultimo = d.truncado ? ultLida : Math.max(SV.ultimo, ultLida, d.ultimo_id || 0);
+    if (SV.leituras.length) {
+      const fim = hora(SV.leituras[SV.leituras.length - 1].hora).getTime();
+      const ini = fim - SV.janela * 60000;
+      SV.leituras = SV.leituras.filter(l => hora(l.hora).getTime() >= ini);
+    }
+    desenharSensor(d);
+    if (d.truncado) espera = 300;   // ainda há leituras novas: busca o resto logo
+  } catch (err) {
+    $("#s-status").innerHTML = `<div class="aviso"><b>Não consegui ler o sensor:</b> ${esc(err.message)}.
+      Tento de novo em 15 s.</div>`;
+    espera = 15000;
+  } finally {
+    SV.emCurso = false;
+    agendarSensor(SV.reiniciarPendente ? 0 : espera);
+  }
+}
+
+function desenharSensor(d) {
+  const rot = {ao_vivo: "Ao vivo", atrasado: "Atrasado", parado: "Parado", sem_leituras: "Sem leituras"}[d.situacao];
+  const loc = d.local ? ` · configuração ${d.local.config}: ${esc(d.local.cultura)} em ${esc(d.local.cidade)}/${esc(d.local.uf)}` : "";
+  let frase;
+  if (d.situacao === "sem_leituras") frase = "A tabela LEITURA_IOT está vazia.";
+  else if (d.situacao === "ao_vivo") frase = `Última leitura há ${fmtIdade(d.idade_s)} (${dataHoraBR(d.ultima)}).`;
+  else frase = `O sensor não envia leitura há ${fmtIdade(d.idade_s)}. Última: ${dataHoraBR(d.ultima)}.
+    Os gráficos mostram a última janela registrada; quando ele voltar a gravar, a tela atualiza sozinha.`;
+  $("#s-status").innerHTML = `<span class="pilula ${d.situacao}">${rot}</span>
+    <span style="margin-left:10px;font-size:13.5px">${frase}</span>
+    <div class="nota" style="margin-top:6px">${d.total.toLocaleString("pt-BR")} leituras no banco${loc}.
+      ${SV.pausado ? "<b>Pausado.</b>" : `Próxima consulta em ${INTERVALO_MS / 1000} s.`}
+      Idade medida pelo relógio do MySQL (${dataHoraBR(d.agora_banco)}).</div>`;
+  if (!SV.leituras.length) { $("#sensor").innerHTML = ""; return; }
+
+  const u = SV.leituras[SV.leituras.length - 1];
+  const dia = d.dia;
+  const kpi = (r, v, det, cls = "") => `<div class="kpi ${cls}"><div class="r">${r}</div><div class="v">${v}</div><div class="d">${det}</div></div>`;
+  const nJan = SV.leituras.length;
+  const media = k => { const v = SV.leituras.map(l => l[k]).filter(x => x != null); return v.length ? v.reduce((a, b) => a + b, 0) / v.length : null; };
+  $("#sensor").innerHTML = `
+    <div class="cartao">
+      <div class="grade">
+        ${kpi("Temperatura", `${fmt(u.temp)} °C`, `média da janela ${fmt(media("temp"))} °C`)}
+        ${kpi("Umidade relativa", `${fmt(u.umid)}%`, `média da janela ${fmt(media("umid"))}%`)}
+        ${kpi("Déficit de pressão de vapor", `${fmt(u.vpd, 2)} kPa`, "calculado: Tetens, como no ETL")}
+        ${kpi("Última leitura", hhmmss(u.hora), `${dataBR(u.hora.slice(0, 10))} · sensor ${u.sensor}`, d.situacao === "ao_vivo" ? "ok" : "al")}
+        ${dia ? kpi(`Dia ${dataBR(dia.dia)}`, `${dia.leituras.toLocaleString("pt-BR")} leituras`,
+              `${fmt(dia.temp_min)}–${fmt(dia.temp_max)} °C · ${fmt(dia.umid_min)}–${fmt(dia.umid_max)}%`, "trad") : ""}
+      </div>
+      <div class="nota">Janela: ${nJan.toLocaleString("pt-BR")} leituras de ${hhmmss(SV.leituras[0].hora)} a ${hhmmss(u.hora)},
+        contadas para trás a partir da última leitura. Intervalos maiores que ${FALHA_GAP_S} s aparecem como quebra na linha (falha de coleta).</div>
+    </div>
+    <div class="duas">
+      <div class="cartao"><h2>Temperatura</h2><div class="sub">°C</div><div class="graf" id="g-temp"></div></div>
+      <div class="cartao"><h2>Umidade relativa</h2><div class="sub">%</div><div class="graf" id="g-umid"></div></div>
+    </div>
+    <div class="cartao">
+      <h2>Últimas leituras</h2>
+      <div style="overflow-x:auto"><table><thead><tr><th>Data e hora</th><th class="n">Temperatura (°C)</th><th class="n">Umidade (%)</th>
+        <th class="n">VPD (kPa)</th><th class="n">Sensor</th><th class="n">Config.</th><th class="n">id_leitura</th></tr></thead>
+      <tbody>${SV.leituras.slice(-15).reverse().map(l => `<tr><td>${dataHoraBR(l.hora)}</td><td class="n">${fmt(l.temp)}</td>
+        <td class="n">${fmt(l.umid)}</td><td class="n">${fmt(l.vpd, 3)}</td><td class="n">${l.sensor}</td>
+        <td class="n">${l.config}</td><td class="n">${l.id}</td></tr>`).join("")}</tbody></table></div>
+    </div>`;
+  graficoLinha($("#g-temp"), SV.leituras, "temp", "°C", 1);
+  graficoLinha($("#g-umid"), SV.leituras, "umid", "%", 1);
+}
+
+function graficoLinha(alvo, dados, campo, un, casas) {
+  const pts = dados.filter(l => l[campo] != null).map(l => ({t: hora(l.hora).getTime(), v: l[campo], l}));
+  if (!pts.length) { alvo.innerHTML = '<div class="nota">sem valores</div>'; return; }
+  const W = 560, H = 190, mE = 40, mD = 12, mT = 10, mB = 24;
+  let t0 = pts[0].t, t1 = pts[pts.length - 1].t;
+  if (t1 === t0) { t0 -= 30000; t1 += 30000; }
+  let lo = Math.min(...pts.map(p => p.v)), hi = Math.max(...pts.map(p => p.v));
+  const folga = Math.max((hi - lo) * 0.15, 0.5); lo -= folga; hi += folga;
+  const x = t => mE + (t - t0) / (t1 - t0) * (W - mE - mD);
+  const y = v => mT + (hi - v) / (hi - lo) * (H - mT - mB);
+  let caminho = "";
+  pts.forEach((p, i) => {
+    const quebra = i === 0 || (p.t - pts[i - 1].t) / 1000 > FALHA_GAP_S;
+    caminho += `${quebra ? "M" : "L"}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`;
+  });
+  const passoY = (() => { const r = (hi - lo) / 4, e = 10 ** Math.floor(Math.log10(r)); return [1, 2, 5, 10].map(m => m * e).find(s => s >= r); })();
+  let grade = "";
+  for (let v = Math.ceil(lo / passoY) * passoY; v <= hi; v += passoY)
+    grade += `<line x1="${mE}" x2="${W - mD}" y1="${y(v)}" y2="${y(v)}" stroke="var(--linha2)"/>
+      <text x="${mE - 6}" y="${y(v) + 4}" text-anchor="end">${fmt(v, passoY < 1 ? 1 : 0)}</text>`;
+  let eixoX = "";
+  for (let i = 0; i <= 4; i++) {
+    const t = t0 + (t1 - t0) * i / 4;
+    eixoX += `<text x="${x(t)}" y="${H - 6}" text-anchor="${i === 0 ? "start" : i === 4 ? "end" : "middle"}">${hhmm(new Date(t))}</text>`;
+  }
+  const ult = pts[pts.length - 1];
+  alvo.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${campo === "temp" ? "Temperatura" : "Umidade"} na janela">
+      ${grade}<line x1="${mE}" x2="${W - mD}" y1="${H - mB}" y2="${H - mB}" stroke="var(--linha)"/>${eixoX}
+      <path d="${caminho}" fill="none" stroke="var(--modelo)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+      ${pts.length === 1 || (pts.length > 1 && (ult.t - pts[pts.length - 2].t) / 1000 > FALHA_GAP_S) ?
+        `<circle cx="${x(ult.t)}" cy="${y(ult.v)}" r="4" fill="var(--modelo)" stroke="var(--cartao)" stroke-width="2"/>` : ""}
+      <g class="mira" style="display:none"><line y1="${mT}" y2="${H - mB}" stroke="var(--mudo)" stroke-dasharray="3 3"/>
+        <circle r="4.5" fill="var(--modelo)" stroke="var(--cartao)" stroke-width="2"/></g>
+      <rect x="${mE}" y="${mT}" width="${W - mE - mD}" height="${H - mT - mB}" fill="transparent" class="alvo"/>
+    </svg><div class="dica"></div>`;
+  const svg = alvo.querySelector("svg"), mira = svg.querySelector(".mira"), dica = alvo.querySelector(".dica");
+  const area = svg.querySelector(".alvo");
+  area.addEventListener("mousemove", ev => {
+    const r = svg.getBoundingClientRect();
+    const px = (ev.clientX - r.left) / r.width * W;
+    const tq = t0 + (px - mE) / (W - mE - mD) * (t1 - t0);
+    let melhor = pts[0];
+    for (const p of pts) if (Math.abs(p.t - tq) < Math.abs(melhor.t - tq)) melhor = p;
+    const cx = x(melhor.t), cy = y(melhor.v);
+    mira.style.display = "";
+    mira.querySelector("line").setAttribute("x1", cx); mira.querySelector("line").setAttribute("x2", cx);
+    mira.querySelector("circle").setAttribute("cx", cx); mira.querySelector("circle").setAttribute("cy", cy);
+    dica.style.display = "block";
+    dica.innerHTML = `<b>${fmt(melhor.v, casas)} ${un}</b> · ${dataHoraBR(melhor.l.hora)}`;
+    const left = cx / W * r.width, larg = dica.offsetWidth;
+    dica.style.left = Math.min(Math.max(left - larg / 2, 0), r.width - larg) + "px";
+    dica.style.top = Math.max(cy / H * r.height - 44, 0) + "px";
+  });
+  area.addEventListener("mouseleave", () => { mira.style.display = "none"; dica.style.display = "none"; });
+}
+
+document.querySelectorAll("nav button").forEach(b => b.addEventListener("click", () => {
+  if (b.dataset.aba === "sensor") { if (!SV.emCurso) consultarSensor(SV.leituras.length === 0); }
+  else clearTimeout(SV.timer);
+}));
+document.addEventListener("visibilitychange", () => {
+  if (sensorVisivel() && !SV.pausado) consultarSensor(false); else clearTimeout(SV.timer);
+});
+$("#s-janela").onchange = ev => { SV.janela = Number(ev.target.value); clearTimeout(SV.timer); consultarSensor(true); };
+$("#s-pausa").onclick = ev => {
+  SV.pausado = !SV.pausado;
+  ev.target.textContent = SV.pausado ? "Continuar" : "Pausar";
+  if (SV.pausado) { clearTimeout(SV.timer); if (SV.ultimaResp) desenharSensor(SV.ultimaResp); }
+  else consultarSensor(false);
+};
+
+(async () => {
+  try {
+    const e = await carregarEstado();
+    carregarConfigs();
+    carregarDesempenho();
+    if (!e.erro_banco && !e.erro_modelo) carregarOpcoes().catch(err => $("#prev").innerHTML = `<div class="cartao erro">Erro: ${esc(err.message)}</div>`);
+  } catch (err) {
+    $("#selo").className = "selo ruim";
+    $("#selo").innerHTML = `<b>O servidor não respondeu.</b> Abra a página por <code>python servidor.py</code> e o endereço que ele mostra, não com duplo clique no arquivo.`;
+  }
+})();
+</script>
+</body>
+</html>

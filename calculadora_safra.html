@@ -1,0 +1,477 @@
+<title>Calculadora da Safra</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Sans+3:ital,wght@0,400;0,600;1,400&display=swap">
+<style>
+/* Layout: coluna única — formulário em cima, laudo embaixo; em telas largas
+   vira duas colunas com o laudo fixo à direita. */
+:root{
+  --papel:#f7f8f4; --carta:#ffffff; --tinta:#17201a; --tinta2:#4a564d;
+  --mudo:#7d8a80; --linha:#dde3da; --campo:#eef1ea;
+  --verde:#2f6b43; --ambar:#a8690b; --terra:#8a3d1f;
+  --ok:#2f6b43; --atencao:#a8690b; --grave:#a32a1e;
+  --disp:"Archivo",system-ui,sans-serif;
+  --corpo:"Source Sans 3",system-ui,sans-serif;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --papel:#12160f; --carta:#1b211a; --tinta:#eef2e8; --tinta2:#b9c4b7;
+  --mudo:#8d998c; --linha:#2d3a2c; --campo:#232b22;
+  --verde:#74b588; --ambar:#e0a44a; --terra:#d1835f;
+  --ok:#74b588; --atencao:#e0a44a; --grave:#e5786a; color-scheme:dark;}}
+:root[data-theme="dark"]{
+  --papel:#12160f; --carta:#1b211a; --tinta:#eef2e8; --tinta2:#b9c4b7;
+  --mudo:#8d998c; --linha:#2d3a2c; --campo:#232b22;
+  --verde:#74b588; --ambar:#e0a44a; --terra:#d1835f;
+  --ok:#74b588; --atencao:#e0a44a; --grave:#e5786a; color-scheme:dark;}
+
+*{box-sizing:border-box}
+body{background:var(--papel);color:var(--tinta);font-family:var(--corpo);
+  font-size:16px;line-height:1.55;margin:0}
+.env{max-width:1060px;margin:0 auto;
+  padding-left:max(16px,env(safe-area-inset-left,0px));
+  padding-right:max(16px,env(safe-area-inset-right,0px));
+  padding-block:28px 56px}
+h1{font-family:var(--disp);font-weight:700;font-size:clamp(26px,5vw,38px);
+  letter-spacing:-.02em;line-height:1.1;margin:0;text-wrap:balance}
+.sub{color:var(--tinta2);margin:8px 0 0;max-width:62ch}
+.faixa{height:4px;background:linear-gradient(90deg,var(--verde) 0 45%,var(--ambar) 45% 70%,var(--terra) 70%);
+  border-radius:2px;margin:22px 0 26px}
+.grade{display:grid;gap:26px;grid-template-columns:1fr}
+@media(min-width:900px){.grade{grid-template-columns:minmax(0,340px) minmax(0,1fr);align-items:start}
+  .painel{position:sticky;top:calc(env(safe-area-inset-top,0px) + 16px)}}
+.cartao{background:var(--carta);border:1px solid var(--linha);border-radius:12px;padding:20px}
+.campo-rot{display:block;font-family:var(--disp);font-weight:600;font-size:11px;
+  letter-spacing:.09em;text-transform:uppercase;color:var(--mudo);margin:0 0 6px}
+.campos{display:grid;gap:16px}
+select,input{width:100%;min-width:0;font:inherit;font-size:15px;color:var(--tinta);
+  background:var(--campo);border:1px solid var(--linha);border-radius:8px;
+  padding:10px 12px;max-width:100%;text-overflow:ellipsis}
+select:focus-visible,input:focus-visible{outline:2px solid var(--verde);outline-offset:1px}
+.dica{font-size:13px;color:var(--mudo);margin:6px 0 0}
+.par{display:grid;gap:12px;grid-template-columns:1fr 1fr}
+@media(max-width:420px){.par{grid-template-columns:1fr}}
+
+.vazio{border:1px dashed var(--linha);border-radius:12px;padding:34px 22px;
+  text-align:center;color:var(--mudo)}
+.resumo{display:grid;gap:14px;grid-template-columns:1fr 1fr}
+@media(max-width:560px){.resumo{grid-template-columns:1fr}}
+.bloco{background:var(--carta);border:1px solid var(--linha);border-radius:12px;padding:18px 20px}
+.bloco .rot{font-family:var(--disp);font-weight:600;font-size:11px;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--mudo)}
+.numerao{font-family:var(--disp);font-weight:700;font-size:clamp(28px,6vw,40px);
+  line-height:1.05;margin:8px 0 2px;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.unid{font-size:15px;color:var(--tinta2);font-weight:400}
+.faixa-txt{font-size:14px;color:var(--tinta2);font-variant-numeric:tabular-nums}
+
+.aviso{border-left:4px solid var(--atencao);background:var(--carta);
+  border-radius:0 10px 10px 0;padding:14px 16px;display:flex;gap:12px;align-items:flex-start}
+.aviso.ok{border-left-color:var(--ok)} .aviso.grave{border-left-color:var(--grave)}
+.selo{font-family:var(--disp);font-weight:700;font-size:11px;letter-spacing:.08em;
+  text-transform:uppercase;padding:3px 8px;border-radius:5px;white-space:nowrap;
+  color:#fff;background:var(--atencao)}
+.selo.ok{background:var(--ok)} .selo.grave{background:var(--grave)}
+.aviso p{margin:0;font-size:14.5px;color:var(--tinta2)}
+.aviso b{color:var(--tinta)}
+
+.ciclo{margin:0;padding:0;list-style:none;display:grid;gap:0}
+.et{display:grid;grid-template-columns:14px 1fr auto;gap:12px;align-items:baseline;
+  padding:11px 0;border-bottom:1px solid var(--linha)}
+.et:last-child{border-bottom:0}
+.pt{width:10px;height:10px;border-radius:50%;align-self:center}
+.et .nm{font-weight:600;font-size:15px}
+.et .dt{font-size:14px;color:var(--tinta2);font-variant-numeric:tabular-nums;text-align:right}
+.et .obs{grid-column:2/-1;font-size:13px;color:var(--mudo);margin-top:-2px}
+
+table{width:100%;border-collapse:collapse;font-size:14.5px}
+th,td{text-align:left;padding:8px 0;border-bottom:1px solid var(--linha)}
+th{font-family:var(--disp);font-weight:600;font-size:11px;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--mudo)}
+td.n{text-align:right;font-variant-numeric:tabular-nums}
+tr:last-child td{border-bottom:0}
+.rolagem{overflow-x:auto}
+
+h2{font-family:var(--disp);font-weight:600;font-size:17px;margin:30px 0 12px;
+  letter-spacing:-.01em}
+.rodape{margin-top:34px;padding-top:18px;border-top:1px solid var(--linha);
+  font-size:13.5px;color:var(--mudo);max-width:72ch}
+.rodape p{margin:0 0 9px}
+@media(prefers-reduced-motion:no-preference){
+  .bloco,.aviso{transition:border-color .2s ease}}
+
+/* -------------------------------------------------- painel do nó sensor --- */
+.sensor{margin-top:30px}
+.sensor-cab{display:flex;flex-wrap:wrap;gap:10px;align-items:baseline;
+  justify-content:space-between;margin-bottom:12px}
+.sensor-cab h2{margin:0}
+.pulso{display:inline-flex;align-items:center;gap:7px;font-size:13px;color:var(--tinta2)}
+.pulso i{width:8px;height:8px;border-radius:50%;background:var(--ok);flex:none}
+.pulso.frio i{background:var(--mudo)}
+.leituras{display:grid;gap:14px;grid-template-columns:1fr 1fr}
+@media(max-width:560px){.leituras{grid-template-columns:1fr}}
+.spark{display:block;width:100%;height:68px;margin-top:10px}
+.mini{font-size:13px;color:var(--mudo);font-variant-numeric:tabular-nums;margin-top:4px}
+.ficha{display:grid;gap:0;margin-top:14px}
+.ficha div{display:flex;justify-content:space-between;gap:14px;padding:8px 0;
+  border-bottom:1px solid var(--linha);font-size:14.5px}
+.ficha div:last-child{border-bottom:0}
+.ficha dt{color:var(--tinta2)} .ficha dd{margin:0;font-variant-numeric:tabular-nums;text-align:right}
+</style>
+<div class="env">
+  <h1>Calculadora da Safra</h1>
+  <p class="sub">Informe onde você planta, o que planta e quando plantou. A calculadora
+  devolve a data prevista de colheita e quanto se espera colher na sua área.</p>
+  <div class="faixa"></div>
+
+  <div class="grade">
+    <!-- ------------------------------------------------ formulário ------- -->
+    <form class="cartao painel" id="form" autocomplete="off">
+      <div class="campos">
+        <div>
+          <label class="campo-rot" for="mun">Município</label>
+          <select id="mun"></select>
+          <p class="dica" id="dica-mun">145 municípios com previsão disponível.</p>
+        </div>
+        <div>
+          <label class="campo-rot" for="cult">Grão</label>
+          <select id="cult"></select>
+        </div>
+        <div>
+          <label class="campo-rot" for="solo">Tipo de solo</label>
+          <select id="solo"></select>
+          <p class="dica" id="dica-solo"></p>
+        </div>
+        <div class="par">
+          <div>
+            <label class="campo-rot" for="area">Área plantada</label>
+            <input id="area" type="number" min="0.1" step="0.1" value="100" inputmode="decimal">
+            <p class="dica">hectares</p>
+          </div>
+          <div>
+            <label class="campo-rot" for="plantio">Data de plantio</label>
+            <input id="plantio" type="date">
+          </div>
+        </div>
+      </div>
+    </form>
+
+    <!-- ---------------------------------------------------- laudo --------- -->
+    <section id="laudo" aria-live="polite"></section>
+  </div>
+
+  <section class="sensor" id="sensor" hidden></section>
+
+  <div class="rodape">
+    <p><b>Como a estimativa é feita.</b> O rendimento por hectare vem de um modelo
+    Elastic Net treinado sobre o clima do ciclo medido pelas estações automáticas do
+    INMET e sobre o rendimento municipal publicado pela Produção Agrícola Municipal do
+    IBGE, nas safras de 2020 a 2024. O valor apresentado é a média das safras observadas
+    no município, e a faixa vem dos resíduos do próprio modelo naquela cultura.</p>
+    <p><b>O que ela não faz.</b> A estimativa não incorpora o clima da safra que está em
+    curso, porque ele ainda não ocorreu. Ela descreve o que o município costuma produzir
+    em condições já observadas, e não uma previsão do ano corrente. O tipo de solo não
+    entra no cálculo do rendimento: ele é usado apenas para verificar a adequação da
+    cultura ao solo, a partir do catálogo pedológico.</p>
+    <p><b>As leituras do nó sensor</b> são exibidas como condição de campo observada
+    e não entram no cálculo do rendimento. O modelo foi treinado sobre agregados
+    semanais por estádio fenológico das estações do INMET; o nó sensor registra
+    temperatura e umidade do ar em uma janela curta, insuficiente para alimentar a
+    previsão. A sua função aqui é documentar a condição local no momento da consulta.</p>
+    <p><b>A data de colheita</b> é obtida somando à data de plantio o ciclo estimado da
+    cultura — 115 dias para a soja, 120 para o milho e 130 para o trigo. É uma referência
+    de calendário, não uma previsão de maturação, que depende do cultivar e do clima.</p>
+  </div>
+</div>
+
+<script>
+const DADOS = {"municipios":{"3503703":{"nome":"Ariranha","uf":"SP","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Soja (em grão)":{"sacas":58.6,"n":2}}},"3504503":{"nome":"Avaré","uf":"SP","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":99.6,"n":2},"Soja (em grão)":{"sacas":63.3,"n":2},"Trigo (em grão)":{"sacas":52.6,"n":2}}},"3505302":{"nome":"Barra Bonita","uf":"SP","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":84.5,"n":2},"Soja (em grão)":{"sacas":59.4,"n":1}}},"3505500":{"nome":"Barretos","uf":"SP","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":93.1,"n":3},"Soja (em grão)":{"sacas":54.6,"n":3}}},"3506003":{"nome":"Bauru","uf":"SP","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":83.0,"n":3},"Soja (em grão)":{"sacas":56.8,"n":2}}},"3506102":{"nome":"Bebedouro","uf":"SP","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":90.9,"n":1},"Soja (em grão)":{"sacas":60.4,"n":1}}},"3507605":{"nome":"Bragança Paulista","uf":"SP","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":98.7,"n":5},"Soja (em grão)":{"sacas":55.1,"n":3},"Trigo (em grão)":{"sacas":55.5,"n":3}}},"3508603":{"nome":"Cachoeira Paulista","uf":"SP","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":76.3,"n":4}}},"3509700":{"nome":"Campos do Jordão","uf":"SP","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":79.0,"n":2}}},"3510807":{"nome":"Casa Branca","uf":"SP","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":126.9,"n":4},"Soja (em grão)":{"sacas":63.0,"n":2},"Trigo (em grão)":{"sacas":60.4,"n":3}}},"3514403":{"nome":"Dracena","uf":"SP","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":75.6,"n":3},"Soja (em grão)":{"sacas":49.6,"n":2}}},"3516200":{"nome":"Franca","uf":"SP","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":105.5,"n":5},"Soja (em grão)":{"sacas":57.7,"n":4}}},"3519600":{"nome":"Ibitinga","uf":"SP","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":87.1,"n":5},"Soja (em grão)":{"sacas":53.3,"n":3}}},"3520301":{"nome":"Iguape","uf":"SP","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":49.7,"n":4}}},"3521002":{"nome":"Iperó","uf":"SP","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":89.3,"n":2},"Soja (em grão)":{"sacas":54.5,"n":1}}},"3522406":{"nome":"Itapeva","uf":"SP","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":102.3,"n":2},"Soja (em grão)":{"sacas":62.8,"n":3},"Trigo (em grão)":{"sacas":56.9,"n":2}}},"3522604":{"nome":"Itapira","uf":"SP","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":78.7,"n":3},"Soja (em grão)":{"sacas":59.4,"n":2}}},"3524105":{"nome":"Ituverava","uf":"SP","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":79.3,"n":3},"Soja (em grão)":{"sacas":59.6,"n":2}}},"3524808":{"nome":"Jales","uf":"SP","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":86.5,"n":3},"Soja (em grão)":{"sacas":56.4,"n":1}}},"3525706":{"nome":"José Bonifácio","uf":"SP","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":77.7,"n":2},"Soja (em grão)":{"sacas":55.3,"n":1}}},"3527108":{"nome":"Lins","uf":"SP","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":69.0,"n":2},"Soja (em grão)":{"sacas":43.6,"n":3}}},"3529005":{"nome":"Marília","uf":"SP","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":81.1,"n":5},"Soja (em grão)":{"sacas":50.2,"n":4}}},"3534708":{"nome":"Ourinhos","uf":"SP","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":68.6,"n":1},"Soja (em grão)":{"sacas":52.0,"n":1}}},"3538709":{"nome":"Piracicaba","uf":"SP","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":95.3,"n":2},"Soja (em grão)":{"sacas":51.8,"n":2},"Trigo (em grão)":{"sacas":53.1,"n":3}}},"3540903":{"nome":"Pradópolis","uf":"SP","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":83.8,"n":5},"Soja (em grão)":{"sacas":56.2,"n":4}}},"3541406":{"nome":"Presidente Prudente","uf":"SP","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":60.5,"n":5}}},"3542206":{"nome":"Rancharia","uf":"SP","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":71.1,"n":4},"Soja (em grão)":{"sacas":56.1,"n":3}}},"3542602":{"nome":"Registro","uf":"SP","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":62.4,"n":2}}},"3548906":{"nome":"São Carlos","uf":"SP","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":92.2,"n":4},"Soja (em grão)":{"sacas":57.8,"n":4}}},"3550001":{"nome":"São Luiz do Paraitinga","uf":"SP","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":87.0,"n":2}}},"3550209":{"nome":"São Miguel Arcanjo","uf":"SP","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":101.4,"n":3},"Soja (em grão)":{"sacas":68.9,"n":3},"Trigo (em grão)":{"sacas":60.2,"n":2}}},"3550308":{"nome":"São Paulo","uf":"SP","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":90.0,"n":3}}},"3550902":{"nome":"São Simão","uf":"SP","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":74.2,"n":5}}},"3552205":{"nome":"Sorocaba","uf":"SP","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":93.0,"n":2},"Soja (em grão)":{"sacas":55.6,"n":1}}},"3554102":{"nome":"Taubaté","uf":"SP","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":92.5,"n":3},"Soja (em grão)":{"sacas":52.5,"n":3},"Trigo (em grão)":{"sacas":58.6,"n":1}}},"3555000":{"nome":"Tupã","uf":"SP","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":69.8,"n":5},"Soja (em grão)":{"sacas":48.9,"n":3}}},"3556305":{"nome":"Valparaíso","uf":"SP","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":82.1,"n":3},"Soja (em grão)":{"sacas":49.5,"n":3}}},"3557105":{"nome":"Votuporanga","uf":"SP","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":81.9,"n":2},"Soja (em grão)":{"sacas":53.4,"n":1}}},"4103909":{"nome":"Campina da Lagoa","uf":"PR","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":93.1,"n":1},"Soja (em grão)":{"sacas":50.1,"n":2},"Trigo (em grão)":{"sacas":43.7,"n":2}}},"4104907":{"nome":"Castro","uf":"PR","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":129.2,"n":2},"Soja (em grão)":{"sacas":59.8,"n":1},"Trigo (em grão)":{"sacas":46.7,"n":1}}},"4105607":{"nome":"Cidade Gaúcha","uf":"PR","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":74.6,"n":2},"Soja (em grão)":{"sacas":55.4,"n":1}}},"4105706":{"nome":"Clevelândia","uf":"PR","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":125.3,"n":4},"Soja (em grão)":{"sacas":62.7,"n":3},"Trigo (em grão)":{"sacas":50.3,"n":3}}},"4105805":{"nome":"Colombo","uf":"PR","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":118.2,"n":4},"Soja (em grão)":{"sacas":64.0,"n":1}}},"4106902":{"nome":"Curitiba","uf":"PR","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":118.6,"n":4},"Soja (em grão)":{"sacas":61.4,"n":3},"Trigo (em grão)":{"sacas":45.9,"n":1}}},"4107108":{"nome":"Diamante do Norte","uf":"PR","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":76.7,"n":2},"Soja (em grão)":{"sacas":55.0,"n":1}}},"4107207":{"nome":"Dois Vizinhos","uf":"PR","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":103.6,"n":3},"Soja (em grão)":{"sacas":69.7,"n":2},"Trigo (em grão)":{"sacas":46.4,"n":3}}},"4108304":{"nome":"Foz do Iguaçu","uf":"PR","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":98.7,"n":3},"Soja (em grão)":{"sacas":55.5,"n":2},"Trigo (em grão)":{"sacas":43.2,"n":2}}},"4108502":{"nome":"General Carneiro","uf":"PR","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":91.8,"n":4},"Soja (em grão)":{"sacas":56.2,"n":4}}},"4108601":{"nome":"Goioerê","uf":"PR","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":93.7,"n":3},"Soja (em grão)":{"sacas":63.6,"n":2},"Trigo (em grão)":{"sacas":41.7,"n":2}}},"4110201":{"nome":"Inácio Martins","uf":"PR","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":106.5,"n":4},"Soja (em grão)":{"sacas":63.8,"n":4},"Trigo (em grão)":{"sacas":46.6,"n":4}}},"4111407":{"nome":"Ivaí","uf":"PR","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":116.2,"n":3},"Soja (em grão)":{"sacas":62.9,"n":2},"Trigo (em grão)":{"sacas":55.8,"n":4}}},"4112306":{"nome":"Japira","uf":"PR","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":95.3,"n":3},"Soja (em grão)":{"sacas":55.2,"n":3},"Trigo (em grão)":{"sacas":35.8,"n":4}}},"4113304":{"nome":"Laranjeiras do Sul","uf":"PR","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":125.4,"n":3},"Soja (em grão)":{"sacas":72.2,"n":2},"Trigo (em grão)":{"sacas":49.9,"n":3}}},"4114609":{"nome":"Marechal Cândido Rondon","uf":"PR","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":75.6,"n":4},"Soja (em grão)":{"sacas":56.2,"n":3},"Trigo (em grão)":{"sacas":37.1,"n":4}}},"4115200":{"nome":"Maringá","uf":"PR","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":71.9,"n":5},"Soja (em grão)":{"sacas":53.9,"n":4},"Trigo (em grão)":{"sacas":31.4,"n":5}}},"4116208":{"nome":"Morretes","uf":"PR","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":57.7,"n":4}}},"4117008":{"nome":"Nova Fátima","uf":"PR","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":67.9,"n":1}}},"4117271":{"nome":"Nova Tebas","uf":"PR","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":96.9,"n":1}}},"4118303":{"nome":"Paranapoema","uf":"PR","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":72.1,"n":4},"Soja (em grão)":{"sacas":39.0,"n":2}}},"4119806":{"nome":"Planalto","uf":"PR","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":89.7,"n":3},"Soja (em grão)":{"sacas":57.7,"n":2},"Trigo (em grão)":{"sacas":39.0,"n":3}}},"4125605":{"nome":"São Mateus do Sul","uf":"PR","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":108.6,"n":3},"Soja (em grão)":{"sacas":61.4,"n":3},"Trigo (em grão)":{"sacas":50.2,"n":3}}},"4128534":{"nome":"Ventania","uf":"PR","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":107.2,"n":1},"Soja (em grão)":{"sacas":64.2,"n":2},"Trigo (em grão)":{"sacas":54.7,"n":2}}},"4300406":{"nome":"Alegrete","uf":"RS","solo":{"id":8,"nome":"Gleissolo Háplico"},"culturas":{"Milho (em grão)":{"sacas":68.4,"n":4},"Soja (em grão)":{"sacas":44.9,"n":2},"Trigo (em grão)":{"sacas":35.5,"n":4}}},"4301602":{"nome":"Bagé","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":53.4,"n":4},"Soja (em grão)":{"sacas":38.1,"n":4},"Trigo (em grão)":{"sacas":40.3,"n":5}}},"4302105":{"nome":"Bento Gonçalves","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":61.4,"n":3},"Trigo (em grão)":{"sacas":34.7,"n":5}}},"4302808":{"nome":"Caçapava do Sul","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":81.2,"n":1},"Soja (em grão)":{"sacas":44.7,"n":4},"Trigo (em grão)":{"sacas":42.1,"n":4}}},"4303509":{"nome":"Camaquã","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":71.1,"n":2},"Soja (em grão)":{"sacas":56.7,"n":2},"Trigo (em grão)":{"sacas":37.2,"n":2}}},"4303608":{"nome":"Cambará do Sul","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":84.7,"n":4},"Soja (em grão)":{"sacas":57.9,"n":4},"Trigo (em grão)":{"sacas":47.2,"n":1}}},"4303905":{"nome":"Campo Bom","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":64.1,"n":4}}},"4304408":{"nome":"Canela","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":98.0,"n":3}}},"4304507":{"nome":"Canguçu","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":63.6,"n":3},"Soja (em grão)":{"sacas":37.5,"n":3},"Trigo (em grão)":{"sacas":41.4,"n":3}}},"4304663":{"nome":"Capão do Leão","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":58.4,"n":4},"Soja (em grão)":{"sacas":50.7,"n":4},"Trigo (em grão)":{"sacas":39.0,"n":2}}},"4306106":{"nome":"Cruz Alta","uf":"RS","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":123.8,"n":4},"Soja (em grão)":{"sacas":49.4,"n":4},"Trigo (em grão)":{"sacas":43.7,"n":5}}},"4306601":{"nome":"Dom Pedrito","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":93.3,"n":2},"Soja (em grão)":{"sacas":41.1,"n":2}}},"4306908":{"nome":"Encruzilhada do Sul","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":63.3,"n":4},"Soja (em grão)":{"sacas":44.4,"n":4},"Trigo (em grão)":{"sacas":43.0,"n":4}}},"4307005":{"nome":"Erechim","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":107.2,"n":2},"Soja (em grão)":{"sacas":62.6,"n":2},"Trigo (em grão)":{"sacas":44.8,"n":2}}},"4308508":{"nome":"Frederico Westphalen","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":68.2,"n":3},"Soja (em grão)":{"sacas":46.1,"n":4},"Trigo (em grão)":{"sacas":36.9,"n":5}}},"4310009":{"nome":"Ibirubá","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":115.4,"n":3},"Soja (em grão)":{"sacas":51.0,"n":4},"Trigo (em grão)":{"sacas":43.8,"n":4}}},"4311007":{"nome":"Jaguarão","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":65.4,"n":4},"Soja (em grão)":{"sacas":41.2,"n":4},"Trigo (em grão)":{"sacas":38.2,"n":4}}},"4311304":{"nome":"Lagoa Vermelha","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":94.7,"n":4},"Soja (em grão)":{"sacas":56.0,"n":4},"Trigo (em grão)":{"sacas":53.8,"n":5}}},"4312500":{"nome":"Mostardas","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":53.0,"n":2},"Soja (em grão)":{"sacas":40.3,"n":2}}},"4313706":{"nome":"Palmeira das Missões","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":104.6,"n":4},"Soja (em grão)":{"sacas":48.6,"n":4},"Trigo (em grão)":{"sacas":38.5,"n":4}}},"4314100":{"nome":"Passo Fundo","uf":"RS","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":96.0,"n":4},"Soja (em grão)":{"sacas":53.8,"n":4},"Trigo (em grão)":{"sacas":54.4,"n":4}}},"4314902":{"nome":"Porto Alegre","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":74.1,"n":4},"Soja (em grão)":{"sacas":50.9,"n":4}}},"4315305":{"nome":"Quaraí","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":63.0,"n":2},"Soja (em grão)":{"sacas":35.3,"n":3},"Trigo (em grão)":{"sacas":45.3,"n":3}}},"4315602":{"nome":"Rio Grande","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":44.8,"n":3},"Soja (em grão)":{"sacas":53.6,"n":3}}},"4315701":{"nome":"Rio Pardo","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":63.8,"n":3},"Soja (em grão)":{"sacas":41.5,"n":3},"Trigo (em grão)":{"sacas":44.8,"n":5}}},"4316907":{"nome":"Santa Maria","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":51.0,"n":3},"Soja (em grão)":{"sacas":30.6,"n":3},"Trigo (em grão)":{"sacas":46.5,"n":4}}},"4317103":{"nome":"Sant'Ana do Livramento","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":55.4,"n":2},"Soja (em grão)":{"sacas":34.5,"n":3},"Trigo (em grão)":{"sacas":47.3,"n":2}}},"4317202":{"nome":"Santa Rosa","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":73.0,"n":2},"Soja (em grão)":{"sacas":51.3,"n":2},"Trigo (em grão)":{"sacas":38.6,"n":4}}},"4317301":{"nome":"Santa Vitória do Palmar","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":55.7,"n":3},"Soja (em grão)":{"sacas":49.3,"n":2}}},"4317400":{"nome":"Santiago","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":60.4,"n":3},"Soja (em grão)":{"sacas":33.8,"n":2},"Trigo (em grão)":{"sacas":40.1,"n":3}}},"4317806":{"nome":"Santo Augusto","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":97.0,"n":4},"Soja (em grão)":{"sacas":52.6,"n":4},"Trigo (em grão)":{"sacas":42.7,"n":5}}},"4318002":{"nome":"São Borja","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":71.5,"n":3},"Soja (em grão)":{"sacas":18.8,"n":3},"Trigo (em grão)":{"sacas":46.7,"n":3}}},"4318309":{"nome":"São Gabriel","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":57.4,"n":3},"Soja (em grão)":{"sacas":39.3,"n":4},"Trigo (em grão)":{"sacas":44.6,"n":3}}},"4318622":{"nome":"São José dos Ausentes","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":78.0,"n":3},"Soja (em grão)":{"sacas":58.9,"n":4}}},"4318903":{"nome":"São Luiz Gonzaga","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":82.5,"n":3},"Soja (em grão)":{"sacas":45.4,"n":2},"Trigo (em grão)":{"sacas":33.4,"n":4}}},"4319802":{"nome":"São Vicente do Sul","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":52.4,"n":3},"Soja (em grão)":{"sacas":29.6,"n":3},"Trigo (em grão)":{"sacas":40.7,"n":2}}},"4320404":{"nome":"Serafina Corrêa","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":90.4,"n":3},"Soja (em grão)":{"sacas":56.4,"n":3},"Trigo (em grão)":{"sacas":37.4,"n":4}}},"4320800":{"nome":"Soledade","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":64.4,"n":2},"Soja (em grão)":{"sacas":42.4,"n":3},"Trigo (em grão)":{"sacas":47.7,"n":4}}},"4321451":{"nome":"Teutônia","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":71.2,"n":4},"Soja (em grão)":{"sacas":44.3,"n":4},"Trigo (em grão)":{"sacas":37.7,"n":4}}},"4321501":{"nome":"Torres","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":79.3,"n":2},"Soja (em grão)":{"sacas":42.7,"n":1}}},"4321600":{"nome":"Tramandaí","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":51.7,"n":4},"Soja (em grão)":{"sacas":28.4,"n":4}}},"4322202":{"nome":"Tupanciretã","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":115.4,"n":3},"Soja (em grão)":{"sacas":43.8,"n":3},"Trigo (em grão)":{"sacas":44.8,"n":4}}},"4322400":{"nome":"Uruguaiana","uf":"RS","solo":{"id":8,"nome":"Gleissolo Háplico"},"culturas":{"Milho (em grão)":{"sacas":70.2,"n":1},"Soja (em grão)":{"sacas":19.9,"n":3},"Trigo (em grão)":{"sacas":37.2,"n":2}}},"4322509":{"nome":"Vacaria","uf":"RS","solo":{"id":3,"nome":"Argissolo Vermelho-Amarelo"},"culturas":{"Milho (em grão)":{"sacas":100.5,"n":3},"Soja (em grão)":{"sacas":59.5,"n":3},"Trigo (em grão)":{"sacas":65.4,"n":5}}},"5100201":{"nome":"Água Boa","uf":"MT","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":105.5,"n":1},"Soja (em grão)":{"sacas":52.1,"n":1}}},"5100250":{"nome":"Alta Floresta","uf":"MT","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":96.9,"n":2}}},"5100300":{"nome":"Alto Araguaia","uf":"MT","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":105.0,"n":4},"Soja (em grão)":{"sacas":53.8,"n":3}}},"5100607":{"nome":"Alto Taquari","uf":"MT","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":106.4,"n":4},"Soja (em grão)":{"sacas":64.3,"n":4}}},"5100805":{"nome":"Apiacás","uf":"MT","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":104.5,"n":1},"Soja (em grão)":{"sacas":50.8,"n":2}}},"5101902":{"nome":"Brasnorte","uf":"MT","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":101.6,"n":2},"Soja (em grão)":{"sacas":59.5,"n":2}}},"5102504":{"nome":"Cáceres","uf":"MT","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":86.3,"n":1}}},"5102637":{"nome":"Campo Novo do Parecis","uf":"MT","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":96.9,"n":2},"Soja (em grão)":{"sacas":61.2,"n":2}}},"5102678":{"nome":"Campo Verde","uf":"MT","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":102.0,"n":4},"Soja (em grão)":{"sacas":58.1,"n":3}}},"5102793":{"nome":"Carlinda","uf":"MT","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":106.3,"n":2},"Soja (em grão)":{"sacas":60.8,"n":1}}},"5103304":{"nome":"Comodoro","uf":"MT","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":100.7,"n":3},"Soja (em grão)":{"sacas":69.5,"n":2}}},"5103379":{"nome":"Cotriguaçu","uf":"MT","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":101.3,"n":2},"Soja (em grão)":{"sacas":63.6,"n":2}}},"5103403":{"nome":"Cuiabá","uf":"MT","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":84.9,"n":2},"Soja (em grão)":{"sacas":40.4,"n":3}}},"5103858":{"nome":"Gaúcha do Norte","uf":"MT","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":97.8,"n":2},"Soja (em grão)":{"sacas":51.2,"n":2}}},"5104104":{"nome":"Guarantã do Norte","uf":"MT","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":100.0,"n":3},"Soja (em grão)":{"sacas":59.0,"n":2}}},"5104203":{"nome":"Guiratinga","uf":"MT","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":100.1,"n":3},"Soja (em grão)":{"sacas":47.5,"n":3}}},"5104609":{"nome":"Itiquira","uf":"MT","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":98.0,"n":1},"Soja (em grão)":{"sacas":68.8,"n":1}}},"5105101":{"nome":"Juara","uf":"MT","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":96.9,"n":2},"Soja (em grão)":{"sacas":59.6,"n":1}}},"5105150":{"nome":"Juína","uf":"MT","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":97.5,"n":4},"Soja (em grão)":{"sacas":59.8,"n":3}}},"5105507":{"nome":"Vila Bela da Santíssima Trindade","uf":"MT","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":84.1,"n":2},"Soja (em grão)":{"sacas":58.9,"n":2}}},"5106240":{"nome":"Nova Ubiratã","uf":"MT","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":106.5,"n":2},"Soja (em grão)":{"sacas":61.7,"n":1}}},"5106307":{"nome":"Paranatinga","uf":"MT","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":98.9,"n":1},"Soja (em grão)":{"sacas":59.6,"n":1}}},"5106752":{"nome":"Pontes e Lacerda","uf":"MT","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":91.6,"n":2},"Soja (em grão)":{"sacas":62.6,"n":2}}},"5106851":{"nome":"Porto Estrela","uf":"MT","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":74.8,"n":3},"Soja (em grão)":{"sacas":58.2,"n":2}}},"5107040":{"nome":"Primavera do Leste","uf":"MT","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":102.4,"n":2},"Soja (em grão)":{"sacas":57.5,"n":2}}},"5107065":{"nome":"Querência","uf":"MT","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":109.3,"n":2},"Soja (em grão)":{"sacas":49.6,"n":2}}},"5107305":{"nome":"São José do Rio Claro","uf":"MT","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":97.5,"n":3},"Soja (em grão)":{"sacas":54.2,"n":3}}},"5107354":{"nome":"São José do Xingu","uf":"MT","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":103.5,"n":2},"Soja (em grão)":{"sacas":59.9,"n":2}}},"5107602":{"nome":"Rondonópolis","uf":"MT","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":92.9,"n":3},"Soja (em grão)":{"sacas":58.4,"n":1}}},"5107701":{"nome":"Rosário Oeste","uf":"MT","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":87.9,"n":2},"Soja (em grão)":{"sacas":54.4,"n":2}}},"5107750":{"nome":"Salto do Céu","uf":"MT","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":86.1,"n":3},"Soja (em grão)":{"sacas":59.6,"n":2}}},"5107792":{"nome":"Santo Antônio do Leste","uf":"MT","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":103.5,"n":3},"Soja (em grão)":{"sacas":66.7,"n":1}}},"5107859":{"nome":"São Félix do Araguaia","uf":"MT","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":98.3,"n":2},"Soja (em grão)":{"sacas":60.8,"n":1}}},"5107875":{"nome":"Sapezal","uf":"MT","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":101.4,"n":2},"Soja (em grão)":{"sacas":54.1,"n":2}}},"5107883":{"nome":"Serra Nova Dourada","uf":"MT","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":83.6,"n":2},"Soja (em grão)":{"sacas":56.5,"n":2}}},"5107909":{"nome":"Sinop","uf":"MT","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":105.0,"n":3},"Soja (em grão)":{"sacas":55.9,"n":2}}},"5107925":{"nome":"Sorriso","uf":"MT","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":108.6,"n":3},"Soja (em grão)":{"sacas":51.6,"n":1}}},"5107958":{"nome":"Tangará da Serra","uf":"MT","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":85.4,"n":4},"Soja (em grão)":{"sacas":54.6,"n":2}}},"5108907":{"nome":"Nova Maringá","uf":"MT","solo":{"id":1,"nome":"Latossolo Vermelho"},"culturas":{"Milho (em grão)":{"sacas":82.2,"n":2},"Soja (em grão)":{"sacas":47.9,"n":1}}}},"residuo":{"Milho (em grão)":{"q10":-33.58,"q25":-14.54,"q50":-2.22,"q75":9.98,"q90":26.19},"Soja (em grão)":{"q10":-9.62,"q25":-4.36,"q50":2.66,"q75":12.16,"q90":18.64},"Trigo (em grão)":{"q10":-14.71,"q25":-5.62,"q50":2.02,"q75":8.48,"q90":14.44}},"solos":[{"id":1,"nome":"Latossolo Vermelho","ordem":"Latossolo","textura":"Argilosa","retencao":4,"drenagem":5,"aptidao":5,"profundidade":5,"erosao":1,"culturas":"Soja, Milho, Trigo","descricao":"Solo profundo e bem drenado. Excelente retenção de nutrientes, ideal para grãos."},{"id":2,"nome":"Latossolo Amarelo","ordem":"Latossolo","textura":"Média/Argilosa","retencao":4,"drenagem":5,"aptidao":4,"profundidade":5,"erosao":1,"culturas":"Soja, Milho","descricao":"Solo profundo, exige correção com calcário para alta produtividade de grãos."},{"id":3,"nome":"Argissolo Vermelho-Amarelo","ordem":"Argissolo","textura":"Média/Argilosa","retencao":3,"drenagem":4,"aptidao":4,"profundidade":4,"erosao":4,"culturas":"Trigo, Milho, Pastagem","descricao":"Gradiente textural. Bom para trigo no Sul, mas exige cuidado com erosão."},{"id":4,"nome":"Neossolo Quartzarênico","ordem":"Neossolo","textura":"Arenosa","retencao":1,"drenagem":5,"aptidao":2,"profundidade":4,"erosao":3,"culturas":"Soja (com irrigação), Pastagem","descricao":"Arenoso e muito drenado. Exige irrigação e manejo de precisão para grãos."},{"id":5,"nome":"Cambissolo Háplico","ordem":"Cambissolo","textura":"Diferenciada","retencao":3,"drenagem":3,"aptidao":2,"profundidade":2,"erosao":4,"culturas":"Trigo, Pastagem","descricao":"Raso e acidentado. Uso restrito para agricultura mecanizada."},{"id":6,"nome":"Vertissolo Háplico","ordem":"Vertissolo","textura":"Muito Argilosa","retencao":5,"drenagem":2,"aptidao":3,"profundidade":3,"erosao":3,"culturas":"Arroz irrigado, Soja","descricao":"Argiloso, racha no seco e alaga na chuva. Exige manejo específico."},{"id":7,"nome":"Neossolo Litólico","ordem":"Neossolo","textura":"Rasa/Diferenciada","retencao":1,"drenagem":4,"aptidao":1,"profundidade":1,"erosao":5,"culturas":"Pastagem nativa","descricao":"Muito raso, com rochas. Inadequado para agricultura intensiva de grãos."},{"id":8,"nome":"Gleissolo Háplico","ordem":"Gleissolo","textura":"Argilosa/Siltosa","retencao":5,"drenagem":1,"aptidao":2,"profundidade":3,"erosao":1,"culturas":"Arroz irrigado","descricao":"Hidromórfico, frequentemente alagado. Condição ideal para arroz irrigado."},{"id":9,"nome":"Espodossolo Ferrocárbico","ordem":"Espodossolo","textura":"Arenosa","retencao":1,"drenagem":5,"aptidao":1,"profundidade":4,"erosao":2,"culturas":"Pastagem","descricao":"Arenoso e pobre em nutrientes. Baixa aptidão para grãos sem alto investimento."},{"id":10,"nome":"Plintossolo Argilúvico","ordem":"Plintossolo","textura":"Média/Argilosa","retencao":3,"drenagem":2,"aptidao":2,"profundidade":3,"erosao":3,"culturas":"Pastagem, Arroz","descricao":"Restrição temporária de drenagem. Uso limitado para culturas de sequeiro."}],"ciclo":{"Soja (em grão)":115,"Milho (em grão)":120,"Trigo (em grão)":130},"preco":{"Soja (em grão)":154.35,"Milho (em grão)":62.0,"Trigo (em grão)":92.3},"custo":{"Soja (em grão)":6115.83,"Milho (em grão)":5200.0,"Trigo (em grão)":4100.0}};
+// ----------------------------------------------------------------- utilidades
+const $ = (s) => document.querySelector(s);
+const nf = (n, c = 0) => n.toLocaleString("pt-BR",
+  { minimumFractionDigits: c, maximumFractionDigits: c });
+const dataBR = (d) => d.toLocaleDateString("pt-BR",
+  { day: "2-digit", month: "long", year: "numeric" });
+const somaDias = (d, n) => { const x = new Date(d.getTime()); x.setDate(x.getDate() + n); return x; };
+const curto = (c) => c.replace(" (em grão)", "");
+
+// Estádios fenológicos, nas mesmas frações usadas no pipeline de modelagem.
+const ESTADIOS = [
+  ["Vegetativo", 0, 0.45, "var(--verde)", "Estabelecimento e crescimento foliar"],
+  ["Floração", 0.45, 0.70, "var(--ambar)", "Fase mais sensível ao estresse térmico e hídrico"],
+  ["Enchimento de grãos", 0.70, 1.0, "var(--terra)", "Define o peso final do grão"],
+];
+
+// ------------------------------------------------- adequação do solo à cultura
+// Regra montada sobre o catálogo pedológico: a cultura é confrontada com as
+// culturas predominantes do solo e com a sua aptidão para grãos. Não é previsão
+// do modelo — é verificação de adequação, e está declarada como tal na tela.
+function adequacao(solo, cultura) {
+  const nome = curto(cultura).toLowerCase();
+  // O catálogo lista a cultura? A comparação é por prefixo, porque a coluna traz
+  // qualificadores — "Soja (com irrigação)" contém "soja".
+  const listada = solo.culturas.toLowerCase().includes(nome);
+  const trecho = solo.culturas.split(",").map((x) => x.trim())
+    .find((x) => x.toLowerCase().includes(nome));
+  const ap = `aptidão ${solo.aptidao} de 5 para grãos`;
+  const dr = `drenagem ${solo.drenagem} de 5`;
+
+  if (listada && solo.aptidao >= 3) {
+    return { nivel: "ok", selo: "Adequado",
+      texto: `O ${solo.nome} tem ${ap}, e ${nome} está entre as culturas
+        predominantes deste solo. ${solo.descricao}` };
+  }
+  if (listada) {
+    // Está no catálogo, mas a aptidão para grãos é baixa — o qualificador do
+    // próprio catálogo diz em que condição. Mostrar o trecho literal.
+    return { nivel: "atencao", selo: "Condicionado",
+      texto: `O ${solo.nome} tem ${ap}, abaixo do que se espera para cultivo de
+        grãos em sequeiro. O catálogo registra o uso como <b>${trecho}</b>.
+        ${solo.descricao} O plantio é possível sob essa condição, não fora dela.` };
+  }
+  if (solo.aptidao <= 2 || solo.drenagem <= 2) {
+    return { nivel: "grave", selo: "Inviável",
+      texto: `O ${solo.nome} tem ${ap} e ${dr}, e o uso predominante registrado é
+        ${solo.culturas.toLowerCase()}. ${solo.descricao} O plantio de ${nome} em
+        sequeiro neste solo é desaconselhado. A estimativa abaixo não considera
+        essa restrição.` };
+  }
+  return { nivel: "atencao", selo: "Possível",
+    texto: `O ${solo.nome} tem ${ap}, o que comporta o cultivo, mas ${nome} não
+      está entre as culturas predominantes deste solo (${solo.culturas.toLowerCase()}).
+      ${solo.descricao} Convém confirmar com assistência técnica local.` };
+}
+
+// ------------------------------------------------------------------ interface
+const municipios = Object.entries(DADOS.municipios)
+  .map(([cod, m]) => ({ cod, ...m }))
+  .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR") || a.uf.localeCompare(b.uf));
+
+$("#mun").innerHTML = municipios
+  .map((m) => `<option value="${m.cod}">${m.nome} — ${m.uf}</option>`).join("");
+$("#solo").innerHTML = DADOS.solos
+  .map((s) => `<option value="${s.id}">${s.nome}</option>`).join("");
+
+const hoje = new Date();
+$("#plantio").value = new Date(hoje.getFullYear(), hoje.getMonth(), hoje.getDate())
+  .toISOString().slice(0, 10);
+
+function culturasDo(cod) { return Object.keys(DADOS.municipios[cod].culturas); }
+
+function montarCulturas() {
+  const cod = $("#mun").value, atual = $("#cult").value;
+  const lista = culturasDo(cod);
+  $("#cult").innerHTML = lista.map((c) => `<option value="${c}">${curto(c)}</option>`).join("");
+  if (lista.includes(atual)) $("#cult").value = atual;
+  $("#dica-mun").textContent = lista.length === 3
+    ? "Soja, milho e trigo com previsão neste município."
+    : `Com previsão neste município: ${lista.map(curto).join(", ").toLowerCase()}.`;
+}
+
+function sincronizarSolo() {
+  const m = DADOS.municipios[$("#mun").value];
+  if (m.solo) {
+    $("#solo").value = String(m.solo.id);
+    $("#dica-solo").textContent = `Registrado para ${m.nome}: ${m.solo.nome}. Altere se o solo da sua área for outro.`;
+  } else {
+    $("#dica-solo").textContent = "Sem solo registrado para este município.";
+  }
+}
+
+// --------------------------------------------------------------------- laudo
+function calcular() {
+  const cod = $("#mun").value;
+  const m = DADOS.municipios[cod];
+  const cultura = $("#cult").value;
+  const dados = m.culturas[cultura];
+  const solo = DADOS.solos.find((s) => s.id === Number($("#solo").value));
+  const area = Math.max(0, Number($("#area").value) || 0);
+  const plantio = $("#plantio").value ? new Date($("#plantio").value + "T12:00:00") : null;
+
+  if (!dados || !area || !plantio) {
+    $("#laudo").innerHTML = `<div class="vazio">Preencha a área e a data de plantio
+      para ver a estimativa.</div>`;
+    return;
+  }
+
+  const ciclo = DADOS.ciclo[cultura];
+  const colheita = somaDias(plantio, ciclo);
+  const faltam = Math.round((colheita - new Date()) / 86400000);
+
+  const r = DADOS.residuo[cultura];
+  const porHa = dados.sacas;
+  const baixo = Math.max(0, porHa + r.q10);
+  const alto = porHa + r.q90;
+  const total = porHa * area;
+
+  // Média sobre poucas safras é frágil: a tela tem de dizer isso.
+  const poucas = dados.n <= 2 ? `<div class="aviso atencao" style="margin-top:14px">
+      <span class="selo atencao">Base curta</span>
+      <p>A média deste município para ${curto(cultura).toLowerCase()} vem de
+      <b>${dados.n === 1 ? "uma única safra observada" : "apenas duas safras observadas"}</b>.
+      Com tão poucas observações a estimativa é frágil: considere a faixa, e não o valor central.</p>
+    </div>` : "";
+
+  const ad = adequacao(solo, cultura);
+  const mSolo = m.solo && m.solo.id !== solo.id
+    ? `<p class="dica" style="margin-top:10px">O solo registrado para ${m.nome} é
+       ${m.solo.nome}; você selecionou ${solo.nome}. A estimativa de rendimento não muda,
+       porque o solo não entra no modelo.</p>` : "";
+
+  const etapas = ESTADIOS.map(([nome, ini, fim, cor, obs]) => {
+    const d1 = somaDias(plantio, Math.round(ciclo * ini));
+    const d2 = somaDias(plantio, Math.round(ciclo * fim));
+    return `<li class="et">
+      <span class="pt" style="background:${cor}"></span>
+      <span class="nm">${nome}</span>
+      <span class="dt">${d1.toLocaleDateString("pt-BR")} – ${d2.toLocaleDateString("pt-BR")}</span>
+      <span class="obs">${obs}</span></li>`;
+  }).join("");
+
+  $("#laudo").innerHTML = `
+    <div class="resumo">
+      <div class="bloco">
+        <div class="rot">Colheita prevista</div>
+        <div class="numerao">${dataBR(colheita)}</div>
+        <div class="faixa-txt">${faltam >= 0
+          ? `daqui a ${nf(faltam)} dias · ciclo de ${ciclo} dias`
+          : `há ${nf(-faltam)} dias · ciclo de ${ciclo} dias`}</div>
+      </div>
+      <div class="bloco">
+        <div class="rot">Colheita estimada</div>
+        <div class="numerao">${nf(total)} <span class="unid">sacas</span></div>
+        <div class="faixa-txt">entre ${nf(baixo * area)} e ${nf(alto * area)} sacas
+          · ${nf(porHa, 1)} sacas por hectare</div>
+      </div>
+    </div>
+
+    <div class="aviso ${ad.nivel}" style="margin-top:14px">
+      <span class="selo ${ad.nivel}">${ad.selo}</span>
+      <p>${ad.texto}</p>
+    </div>
+    ${poucas}
+    ${mSolo}
+
+    <h2>Calendário do ciclo</h2>
+    <div class="cartao"><ul class="ciclo">${etapas}
+      <li class="et"><span class="pt" style="background:var(--tinta)"></span>
+        <span class="nm">Colheita</span>
+        <span class="dt">${colheita.toLocaleDateString("pt-BR")}</span></li>
+    </ul></div>
+
+    <h2>Base da estimativa</h2>
+    <div class="cartao rolagem"><table>
+      <tr><th>Item</th><th style="text-align:right">Valor</th></tr>
+      <tr><td>Município</td><td class="n">${m.nome} — ${m.uf}</td></tr>
+      <tr><td>Cultura</td><td class="n">${curto(cultura)}</td></tr>
+      <tr><td>Área informada</td><td class="n">${nf(area, 1)} ha</td></tr>
+      <tr><td>Rendimento médio previsto</td><td class="n">${nf(porHa, 1)} sacas/ha</td></tr>
+      <tr><td>Faixa provável (80%)</td><td class="n">${nf(baixo, 1)} – ${nf(alto, 1)} sacas/ha</td></tr>
+      <tr><td>Safras observadas no município</td><td class="n">${dados.n}</td></tr>
+      <tr><td>Solo informado</td><td class="n">${solo.nome}</td></tr>
+    </table></div>`;
+}
+
+function atualizar() { montarCulturas(); sincronizarSolo(); calcular(); }
+$("#mun").addEventListener("change", atualizar);
+["#cult", "#solo", "#area", "#plantio"].forEach((s) =>
+  $(s).addEventListener("input", calcular));
+atualizar();
+
+// ========================================================= nó sensor (IoT) ==
+// A página não alcança o MySQL: o navegador do artefato só faz HTTPS para
+// domínios liberados. As leituras chegam por sensor.json, gerado na máquina do
+// autor por exportar_sensor.py. Sem o arquivo, o painel simplesmente não aparece.
+const brNum = (v, c = 1) => v == null ? "—" : nf(v, c);
+
+function sparkline(pontos, campo, cor) {
+  const vs = pontos.map((p) => p[campo]).filter((v) => v != null);
+  if (vs.length < 2) return "";
+  const lo = Math.min(...vs), hi = Math.max(...vs), amp = (hi - lo) || 1;
+  const L = 300, A = 68, m = 6;
+  const d = vs.map((v, i) => {
+    const x = m + (i / (vs.length - 1)) * (L - 2 * m);
+    const y = A - m - ((v - lo) / amp) * (A - 2 * m);
+    return `${i ? "L" : "M"}${x.toFixed(1)} ${y.toFixed(1)}`;
+  }).join(" ");
+  const ux = m + (L - 2 * m), uy = A - m - ((vs.at(-1) - lo) / amp) * (A - 2 * m);
+  return `<svg class="spark" viewBox="0 0 ${L} ${A}" preserveAspectRatio="none"
+      role="img" aria-label="variação das leituras na janela registrada">
+      <path d="${d}" fill="none" stroke="${cor}" stroke-width="2"
+        stroke-linejoin="round" stroke-linecap="round"/>
+      <circle cx="${ux.toFixed(1)}" cy="${uy.toFixed(1)}" r="3.5" fill="${cor}"/>
+    </svg>`;
+}
+
+function montarSensor(s) {
+  const q = new Date(s.ultima.quando);
+  const horas = (Date.now() - q.getTime()) / 36e5;
+  const recente = horas < 2;
+  const amostra = s._AMOSTRA_SINTETICA === true;
+
+  // A coluna declara minutos; o intervalo real é medido na exportação. Quando
+  // divergem, a tela mostra os dois em vez de escolher um.
+  const fd = s.sensor.frequencia_declarada_min, im = s.sensor.intervalo_medido_s;
+  const divergente = fd != null && im != null && Math.abs(fd * 60 - im) > Math.max(5, fd * 12);
+
+  $("#sensor").hidden = false;
+  $("#sensor").innerHTML = `
+    <div class="sensor-cab">
+      <h2>Leituras do nó sensor</h2>
+      <span class="pulso ${recente ? "" : "frio"}"><i></i>
+        ${recente ? "leitura recente" : `última leitura ${dataBR(q)}`}</span>
+    </div>
+
+    ${amostra ? `<div class="aviso atencao" style="margin-bottom:14px">
+      <span class="selo atencao">Amostra</span>
+      <p>Este painel está exibindo uma <b>amostra sintética</b> de demonstração.
+      Gere o arquivo real com <b>exportar_sensor.py</b> para substituí-la.</p></div>` : ""}
+
+    <div class="leituras">
+      <div class="bloco">
+        <div class="rot">Temperatura do ar</div>
+        <div class="numerao">${brNum(s.ultima.temperatura)} <span class="unid">°C</span></div>
+        <div class="faixa-txt">mínima ${brNum(s.resumo.temp_min)} · média
+          ${brNum(s.resumo.temp_media)} · máxima ${brNum(s.resumo.temp_max)}</div>
+        ${sparkline(s.serie, "temp", "var(--terra)")}
+        <div class="mini">variação na janela registrada</div>
+      </div>
+      <div class="bloco">
+        <div class="rot">Umidade relativa</div>
+        <div class="numerao">${brNum(s.ultima.umidade)} <span class="unid">%</span></div>
+        <div class="faixa-txt">mínima ${brNum(s.resumo.umid_min)} · média
+          ${brNum(s.resumo.umid_media)} · máxima ${brNum(s.resumo.umid_max)}</div>
+        ${sparkline(s.serie, "umid", "var(--verde)")}
+        <div class="mini">variação na janela registrada</div>
+      </div>
+    </div>
+
+    <div class="cartao" style="margin-top:14px">
+      <dl class="ficha">
+        <div><dt>Dispositivo</dt><dd>${s.sensor.modelo}${s.sensor.fabricante ? " — " + s.sensor.fabricante : ""}</dd></div>
+        <div><dt>Protocolo</dt><dd>${s.sensor.protocolo || "—"}</dd></div>
+        <div><dt>Estado</dt><dd>${s.sensor.status || "—"}</dd></div>
+        <div><dt>Leituras na janela</dt><dd>${nf(s.janela.leituras)} em ${brNum(s.janela.duracao_horas, 2)} h</dd></div>
+        <div><dt>Intervalo entre leituras</dt><dd>${im == null ? "—" : nf(im, 1) + " s (medido)"}</dd></div>
+        ${fd != null ? `<div><dt>Frequência declarada no cadastro</dt>
+          <dd>${nf(fd)} ${fd === 1 ? "minuto" : "minutos"}</dd></div>` : ""}
+        ${s.local.cultura ? `<div><dt>Cultura da configuração</dt><dd>${s.local.cultura}</dd></div>` : ""}
+        ${s.local.solo ? `<div><dt>Solo da configuração</dt><dd>${s.local.solo}</dd></div>` : ""}
+        <div><dt>Exportado em</dt><dd>${new Date(s.gerado_em).toLocaleString("pt-BR")}</dd></div>
+      </dl>
+    </div>
+
+    ${divergente ? `<div class="aviso atencao" style="margin-top:14px">
+      <span class="selo atencao">Divergência</span>
+      <p>O cadastro declara amostragem de <b>${nf(fd)} minutos</b>, mas o intervalo
+      medido entre leituras é de <b>${nf(im, 1)} segundos</b>. Ou o valor está na
+      unidade errada, ou o nome da coluna está. Vale corrigir antes da entrega.</p>
+    </div>` : ""}
+
+    <p class="mini" style="margin-top:12px">As leituras acima descrevem a condição de
+    campo observada e não entram no cálculo do rendimento.</p>`;
+}
+
+fetch("sensor.json", { cache: "no-store" })
+  .then((r) => r.ok ? r.json() : Promise.reject(r.status))
+  .then(montarSensor)
+  .catch(() => { /* sem arquivo de sensor, o painel não aparece */ });
+
+</script>

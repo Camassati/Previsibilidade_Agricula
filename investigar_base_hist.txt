@@ -1,0 +1,31 @@
+Python 3.14.7 | numpy 2.5.2 | pandas 3.0.5 | Windows-10-10.0.19045-SP0
+modelo_export.json: 920 linhas, md5 723a4e0ed7dc0021d95e014c48c4b4e2
+
+1. A PLANILHA (df_tcc_modelo.xlsx) reproduz o JSON hoje?
+   planilha, código atual (quicksort)                         divergentes:  325 de 920
+   planilha, ordenação estável (mergesort)                    divergentes:  318 de 920
+   planilha, UF só com safras anteriores                      divergentes:  312 de 920
+
+2. O BANCO (BASE_MODELO) é igual à planilha?
+   linhas casadas: 920 | base_hist planilha x banco divergentes: 0
+   variáveis climáticas planilha x banco com diferença: nenhuma
+
+3. Variáveis do banco x valores do JSON, coluna por coluna
+   colunas com divergência: {'base_hist': 325}
+
+4. Quem são as linhas divergentes (planilha, código atual)?
+   325 linhas | sem histórico municipal (caem no fallback da UF): 325
+   por safra: {2020: 108, 2021: 104, 2022: 28, 2023: 67, 2024: 18}
+   por UF   : {'RS': 119, 'MT': 76, 'SP': 71, 'PR': 59}
+   na base inteira, linhas que caem no fallback da UF: 330 de 920
+
+5. O fallback da UF usa safras do MESMO ano? (código atual)
+   linhas em que a média da UF (usada quando falta histórico municipal) já inclui safra do mesmo ano: 870
+
+6. Trecho da base_hist no treinar_export.py local
+     41: df = df.sort_values(["cod_municipio", "cultura_tcc", "ano_pam"]).reset_index(drop=True)
+     45: df["base_hist"] = g.apply(lambda s: s.shift().expanding().mean()).reset_index(level=[0,1], drop=True)
+     46: ufp = (df.sort_values("ano_pam").groupby(["UF","cultura_tcc"])["rendimento_sacas_ha"]
+     48: df["base_hist"] = df.base_hist.fillna(ufp).fillna(df.rendimento_sacas_ha.mean())
+     55:            [c for c in SOLO if c in df.columns] + ["base_hist"]
+    117:                    "hist": round(float(r.base_hist),2)})
