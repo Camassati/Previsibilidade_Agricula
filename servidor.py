@@ -452,20 +452,112 @@ def agregar_sensor(id_config, plantio, ciclo, hoje):
     return res
 
 
-def base_hist_ao_vivo(cods, cultura, uf):
-    """Média histórica para uma safra nova, com a regra de media_historica.py:
-    safras anteriores do município na base; reserva: UF nas safras anteriores
-    do IBGE; depois a cultura. Para uma safra em curso, todas são anteriores."""
+def base_hist_ao_vivo(cods, cultura, uf, ano=None):
+    """Média histórica com a regra de media_historica.py: safras ANTERIORES do
+    município na base; reserva: UF nas safras anteriores do IBGE; depois a
+    cultura. `ano` = safra prevista: só entram safras < ano (para uma safra
+    passada, nunca usa o próprio ano nem os seguintes). Sem `ano`, usa todas
+    (safra em curso: todas são anteriores)."""
     b = EST["base"]
     s = b[b.cod_municipio.isin(cods) & (b.cultura_tcc == cultura)]
+    corte = "" if ano is None else f", anteriores a {ano}"
+    if ano is not None:
+        s = s[s.ano_pam < ano]
     if len(s):
-        return float(s.rendimento_sacas_ha.mean()), f"média das {len(s)} safras do município na base do modelo"
+        qt = "da safra" if len(s) == 1 else f"das {len(s)} safras"
+        return (float(s.rendimento_sacas_ha.mean()),
+                f"média {qt} do município na base do modelo{corte}")
     p = pam_padronizada(EST["pam"])
+    if ano is not None:
+        p = p[p.ano < ano]
     s = p[(p.UF == uf) & (p.cultura_tcc == cultura)]
     if len(s):
-        return float(s.sacas.mean()), "média da UF no IBGE (município sem safra na base)"
+        return float(s.sacas.mean()), f"média da UF no IBGE (município sem safra anterior na base{corte})"
     s = p[p.cultura_tcc == cultura]
-    return (float(s.sacas.mean()) if len(s) else None), "média da cultura no IBGE"
+    return (float(s.sacas.mean()) if len(s) else None), f"média da cultura no IBGE{corte}"
+
+
+# ===================================================== clima do INMET ======
+# Safra que JÁ PASSOU: o clima é o das estações do INMET ligadas ao município
+# (PONTE_ESTACAO_MUNICIPIO -> CLIMA_SEMANAL), com as regras de
+# alvo_produtividade_5.ipynb: média entre estações semana a semana; posição da
+# semana no ciclo i/(n-1) -> estádio; agregação por AGREGACAO_CICLO (soma com
+# min_count=1, para não inventar zero). Única diferença do treino: o ciclo
+# começa no plantio informado, não na janela fixa da cultura na UF.
+AGREGACAO_CICLO = {   # cópia de alvo_produtividade_5.ipynb, célula 17
+    "precipitacao_total_mm": "sum", "graus_dia_acum": "sum", "radiacao_total_mjm2": "sum",
+    "dias_com_chuva": "sum", "maior_veranico": "max", "dias_secos_acumulados": "max",
+    "temp_media": "mean", "temp_max_abs": "max", "temp_min_abs": "min",
+    "amplitude_termica": "mean", "umidade_media": "mean", "umidade_min_abs": "min",
+    "vpd_medio_kpa": "mean", "vpd_max_kpa": "max", "pressao_media": "mean",
+    "vento_medio": "mean", "vento_rajada_max": "max", "cobertura": "mean",
+}
+
+
+def _rotular_estadio(pos):
+    for nome, ini, fim in ESTADIOS:
+        if ini <= pos < fim:
+            return nome
+    return ESTADIOS[-1][0]
+
+
+def _agregar_coluna(serie, como):
+    return serie.sum(min_count=1) if como == "sum" else serie.agg(como)
+
+
+def agregar_inmet(cod, plantio, ciclo):
+    """CLIMA_SEMANAL das estações do município -> variáveis por estádio."""
+    fim = plantio + timedelta(days=ciclo)          # dia seguinte à colheita
+    cols = ", ".join(f"c.{v}" for v in AGREGACAO_CICLO)
+    sem, lim, est = ler_varios([
+        (f"""SELECT c.id_regiao, c.data_inicio, c.data_fim, {cols}
+               FROM CLIMA_SEMANAL c
+               JOIN PONTE_ESTACAO_MUNICIPIO p ON p.id_regiao = c.id_regiao
+              WHERE p.cod_municipio_ibge = %s
+                AND c.data_fim >= %s AND c.data_inicio < %s""", (cod, plantio, fim)),
+        ("""SELECT MIN(c.data_inicio) AS primeira, MAX(c.data_fim) AS ultima
+              FROM CLIMA_SEMANAL c
+              JOIN PONTE_ESTACAO_MUNICIPIO p ON p.id_regiao = c.id_regiao
+             WHERE p.cod_municipio_ibge = %s""", (cod,)),
+        ("""SELECT r.id_regiao, r.cidade, r.uf, r.cod_estacao
+              FROM PONTE_ESTACAO_MUNICIPIO p
+              JOIN REGIAO r ON r.id_regiao = p.id_regiao
+             WHERE p.cod_municipio_ibge = %s ORDER BY r.cod_estacao""", (cod,)),
+    ])
+    seg0 = plantio - timedelta(days=plantio.weekday())
+    ult_dia = fim - timedelta(days=1)
+    segN = ult_dia - timedelta(days=ult_dia.weekday())
+    esperadas = [seg0 + timedelta(days=7 * i) for i in range((segN - seg0).days // 7 + 1)]
+    n = len(esperadas)
+    pos = {s_: i / max(n - 1, 1) for i, s_ in enumerate(esperadas)}
+    l = lim.iloc[0] if len(lim) else None
+    res = {"estacoes": [f"{r.cod_estacao} {r.cidade}/{r.uf}" for r in est.itertuples()],
+           "dados_de": None if l is None or vazio(l.primeira) else pd.Timestamp(l.primeira).date(),
+           "dados_ate": None if l is None or vazio(l.ultima) else pd.Timestamp(l.ultima).date(),
+           "semanas_esperadas": n, "semanas_validas": 0, "cobertura_ciclo": 0.0,
+           "estadios": {}}
+    w = pd.DataFrame()
+    if len(sem):
+        sem = numerico(sem, exceto={"data_inicio", "data_fim"})
+        sem["data_inicio"] = pd.to_datetime(sem["data_inicio"]).dt.date
+        sem["segunda"] = sem["data_inicio"].map(lambda d: d - timedelta(days=d.weekday()))
+        sem = sem[sem.segunda.isin(pos)]
+        # várias estações no município: média entre elas, semana a semana (como no notebook)
+        w = sem.groupby("segunda")[list(AGREGACAO_CICLO)].mean()
+        w["estadio"] = [_rotular_estadio(pos[s_]) for s_ in w.index]
+        res["semanas_validas"] = int(w.temp_media.notna().sum())
+        res["cobertura_ciclo"] = res["semanas_validas"] / n if n else 0.0
+    for nome, _, _ in ESTADIOS:
+        segs = [s_ for s_ in esperadas if _rotular_estadio(pos[s_]) == nome]
+        sub = w[w.estadio == nome] if len(w) else w
+        validas = int(sub.temp_media.notna().sum()) if len(sub) else 0
+        res["estadios"][nome] = {
+            "inicio": max(segs[0], plantio) if segs else None,
+            "fim": min(segs[-1] + timedelta(days=6), ult_dia) if segs else None,
+            "semanas": len(segs), "semanas_validas": validas,
+            "valores": ({v: _agregar_coluna(sub[v], como) for v, como in AGREGACAO_CICLO.items()}
+                        if validas else None)}
+    return res
 
 
 def previsao_com_sensor(sensor, cultura, cods, uf):
@@ -694,11 +786,16 @@ def api_solos(_q):
 def api_calcular(q):
     """Formulário do produtor -> produtividade estimada e produção da área.
 
-    Clima: SEMPRE do sensor (LEITURA_IOT), como média mensal de todos os
-    registros (decisão do autor, 26/10). Os meses dentro do ciclo, contado a
-    partir do plantio informado, alimentam os estádios; o modelo usado é o do
-    último estádio que tem leitura (M1, M2 ou M3). Variáveis que o sensor não
-    mede entram com a mediana do treino. O solo NÃO entra no modelo."""
+    De onde vem o clima (decisão do autor, 05/11):
+      - safra que JÁ PASSOU (colheita estimada antes de hoje): clima daquele
+        tempo, das estações do INMET ligadas ao município (CLIMA_SEMANAL), com
+        as regras de agregação do treino; modelo do último estádio com dado
+        (normalmente M3, ciclo completo).
+      - safra ATUAL (em curso ou ainda por plantar): clima de agora, do sensor
+        (LEITURA_IOT), média mensal de todos os registros (decisão de 26/10);
+        modelo do último estádio com leitura; o que o sensor não mede entra com
+        a mediana do treino.
+    O solo NÃO entra no modelo: é ajuste por regra depois da previsão."""
     exigir_base()
     cod, cult = int(q["m"][0]), q["c"][0]
     unidade = q.get("unidade", ["ha"])[0]
@@ -706,14 +803,17 @@ def api_calcular(q):
     if area <= 0:
         raise RuntimeError("informe uma área maior que zero")
     if not q.get("plantio", [""])[0]:
-        raise RuntimeError("informe a data de plantio: é ela que diz em que estádio cada mês do sensor cai")
+        raise RuntimeError("informe a data de plantio: é ela que diz se a safra já passou "
+                           "e em que estádio cai cada período de clima")
     # Solo é obrigatório (decisão do autor, 26/10), e cada solo x cultura
     # precisa ter a sua linha na tabela de ajuste — sem regra, não calcula.
     if not q.get("solo", [""])[0]:
         raise RuntimeError("informe o tipo de solo: ele é obrigatório")
     id_solo = int(q["solo"][0])
-    if not len(ler_sql("SELECT id_solo FROM TIPO_SOLO WHERE id_solo = %s", (id_solo,))):
+    t_solo = ler_sql("SELECT * FROM TIPO_SOLO WHERE id_solo = %s", (id_solo,))
+    if not len(t_solo):
         raise RuntimeError(f"tipo de solo {id_solo} não existe na tabela TIPO_SOLO")
+    solo = t_solo.iloc[0].to_dict()
     regra = ajustes_solo().get((id_solo, cult))
     if regra is None:
         raise RuntimeError(f"o solo {id_solo} não tem regra para {cult} em {ARQ_AJUSTE}; "
@@ -721,115 +821,165 @@ def api_calcular(q):
     ha = area / 10000 if unidade == "m2" else area
     b = EST["base"]
     sub = b[(b.cod_municipio == cod) & (b.cultura_tcc == cult)]
-    if len(sub):
-        nome, uf = sub.municipio_ibge.iloc[0], sub.UF.iloc[0]
-    else:
+    if not len(sub):
         raise RuntimeError("município fora da base do modelo")
-    avisos, realizado = [], None
-    plantio_cfg = date.fromisoformat(q["plantio"][0])
+    nome, uf = sub.municipio_ibge.iloc[0], sub.UF.iloc[0]
+
+    plantio = date.fromisoformat(q["plantio"][0])
     cu = ler_sql("SELECT nome_cultura, ciclo_estimado_dias FROM CULTURA")
     ciclos = {f"{n} (em grão)": d for n, d in zip(cu.nome_cultura, cu.ciclo_estimado_dias)}
     if cult not in ciclos or vazio(ciclos[cult]):
         raise RuntimeError("cultura sem ciclo_estimado_dias na tabela CULTURA")
-    sensor = agregar_sensor(None, plantio_cfg, int(ciclos[cult]), date.today())
-    estadios_com = [e for e in ("vegetativo", "floracao", "enchimento")
-                    if sensor["estadios"][e]["valores"]]
-    if not estadios_com:
-        return {"sem_dados": True, "municipio": nome, "uf": uf, "cultura": cult,
-                "sensor": sensor,
-                "motivo": "nenhum registro do sensor cai dentro do ciclo que começa no plantio "
-                          "informado; ajuste a data de plantio ou ligue o sensor"}
-    mom = MOMENTO_DO_ESTADIO[estadios_com[-1]]
-    linha = {}
-    for est in estadios_com:
-        for v, x in sensor["estadios"][est]["valores"].items():
-            linha[f"{est}_{v}"] = x
-    hist, origem_hist = base_hist_ao_vivo([cod], cult, uf)
+    ciclo = int(ciclos[cult])
+    colheita = plantio + timedelta(days=ciclo)
+    hoje = date.today()
+    # Ano da safra = ano da colheita: é como a PAM registra (soja plantada em
+    # out/2023 e colhida em fev/2024 é safra 2024). Derivado aqui da data; no
+    # treino vinha do offset_ano_pam da janela da cultura.
+    ano_safra = colheita.year
+    passada = colheita < hoje
+    base = {"municipio": nome, "uf": uf, "cultura": cult, "colheita": colheita,
+            "ciclo_dias": ciclo, "ano_safra": ano_safra, "hoje": hoje,
+            "modo": "passada" if passada else "atual",
+            "fonte_clima": "inmet" if passada else "sensor"}
+    nomes_est = {"vegetativo": "vegetativo", "floracao": "floração", "enchimento": "enchimento"}
+    avisos, extra = [], {}
+
+    if passada:
+        # ------------------------------------------------ clima daquele tempo
+        inm = agregar_inmet(cod, plantio, ciclo)
+        estadios_com = [e for e in ("vegetativo", "floracao", "enchimento")
+                        if inm["estadios"][e]["valores"]]
+        if not estadios_com:
+            ate = inm["dados_ate"].strftime("%d/%m/%Y") if inm["dados_ate"] else "—"
+            de = inm["dados_de"].strftime("%d/%m/%Y") if inm["dados_de"] else "—"
+            return {**base, "sem_dados": True, "inmet": inm,
+                    "motivo": (f"a safra já passou, mas não há clima do INMET no banco para este ciclo "
+                               f"({plantio:%d/%m/%Y} a {colheita:%d/%m/%Y}); as estações ligadas ao "
+                               f"município têm dados de {de} a {ate}")}
+        mom = MOMENTO_DO_ESTADIO[estadios_com[-1]]
+        linha = {f"{est}_{v}": x for est in estadios_com
+                 for v, x in inm["estadios"][est]["valores"].items()}
+        hist, origem_hist = base_hist_ao_vivo([cod], cult, uf, ano=ano_safra)
+        cob = f"{100 * inm['cobertura_ciclo']:.0f}"
+        clima = (f"safra passada · clima do INMET daquele período ({', '.join(inm['estacoes']) or '—'}), "
+                 f"{inm['semanas_validas']} de {inm['semanas_esperadas']} semanas com dado · "
+                 f"modelo {mom} ({ROTULO_MOMENTO[mom]})")
+        avisos.append(f"a colheita estimada ({colheita:%d/%m/%Y}) já passou: o clima é o que as "
+                      "estações do INMET mediram naquele ciclo, agregado com as mesmas regras do treino")
+        if inm["cobertura_ciclo"] < MIN_COBERTURA_CICLO:
+            avisos.append(f"só {cob}% das semanas do ciclo têm dado do INMET; no treino a safra só "
+                          f"entrava com {100 * MIN_COBERTURA_CICLO:.0f}% ou mais")
+        faltam = [e for e in ("vegetativo", "floracao", "enchimento") if e not in estadios_com]
+        if faltam:
+            avisos.append("estádios sem dado do INMET: " + ", ".join(nomes_est[x] for x in faltam) +
+                          f"; por isso a estimativa usa o modelo {mom}")
+        avisos.append("estádios contados a partir do plantio informado; no treino eram frações da "
+                      "janela fixa da cultura na UF")
+        na_base = bool(len(sub[sub.ano_pam == ano_safra]))
+        if na_base:
+            avisos.append(f"a safra {ano_safra} deste município está na base usada para TREINAR o "
+                          "modelo: ele já viu esse rendimento, então a diferença para o realizado "
+                          "aqui é otimista. O erro honesto (fora da amostra) está na aba Desempenho")
+        rz = ler_sql("""SELECT rendimento_sacas_ha FROM PRODUTIVIDADE_OBSERVADA
+                         WHERE cod_municipio_ibge = %s AND cultura_tcc = %s AND safra = %s""",
+                     (cod, cult, ano_safra))
+        realizado = float(rz.rendimento_sacas_ha.iloc[0]) if len(rz) else None
+        if realizado is None:
+            avisos.append(f"o IBGE não tem rendimento de {cult} em {nome} na safra {ano_safra} "
+                          "(ou ainda não publicou: a PAM sai cerca de um ano depois)")
+        extra = {"inmet": inm, "realizado_sacas_ha": realizado, "na_base_treino": na_base,
+                 "estadios": {k: {kk: v[kk] for kk in ("inicio", "fim", "semanas", "semanas_validas", "valores")}
+                              for k, v in inm["estadios"].items()}}
+    else:
+        # ------------------------------------------------ clima de agora
+        sensor = agregar_sensor(None, plantio, ciclo, hoje)
+        estadios_com = [e for e in ("vegetativo", "floracao", "enchimento")
+                        if sensor["estadios"][e]["valores"]]
+        if not estadios_com:
+            return {**base, "sem_dados": True, "sensor": sensor,
+                    "motivo": "nenhum registro do sensor cai dentro do ciclo que começa no plantio "
+                              "informado; ajuste a data de plantio ou ligue o sensor"}
+        mom = MOMENTO_DO_ESTADIO[estadios_com[-1]]
+        linha = {f"{est}_{v}": x for est in estadios_com
+                 for v, x in sensor["estadios"][est]["valores"].items()}
+        hist, origem_hist = base_hist_ao_vivo([cod], cult, uf)
+        realizado = None
+        meses = sorted({m for est in estadios_com for m in sensor["estadios"][est]["meses"]})
+        clima = (f"safra atual · sensor (LEITURA_IOT): média mensal de todos os registros de "
+                 f"{', '.join(meses)} · modelo {mom} ({ROTULO_MOMENTO[mom]})")
+        faltam = [e for e in ("vegetativo", "floracao", "enchimento") if e not in estadios_com]
+        if faltam:
+            avisos.append("estádios sem registro do sensor: " + ", ".join(nomes_est[x] for x in faltam) +
+                          f"; por isso a estimativa usa o modelo {mom}")
+        for est in estadios_com:
+            e = sensor["estadios"][est]
+            cob = f"{100 * e['valores']['cobertura']:.1f}".replace(".", ",")
+            avisos.append(f"{nomes_est[est]}: {e['leituras']} registros em {e['dias_com_leitura']} dia(s) de "
+                          f"{e['dias_do_estadio']} do estádio (cobertura {cob}%)")
+        if sensor["configs"]:
+            avisos.append("os registros do sensor estão ligados à(s) configuração(ões) "
+                          + ", ".join(str(c) for c in sensor["configs"])
+                          + "; confira se o sensor estava no município escolhido")
+        avisos.append("um mês que cruza dois estádios entra nos dois; graus-dia projetados como "
+                      "(temperatura média − 10 °C) × dias do estádio")
+        extra = {"mensal": sensor["mensal"],
+                 "estadios": {k: {kk: v[kk] for kk in ("inicio", "fim", "meses", "dias_com_leitura",
+                                                       "dias_do_estadio", "leituras", "valores")}
+                              for k, v in sensor["estadios"].items()},
+                 "sensor_resumo": {k: sensor[k] for k in ("leituras", "primeira", "ultima",
+                                                          "fora_do_ciclo", "configs")}}
     linha["base_hist"] = hist
-    meses = sorted({m for est in estadios_com for m in sensor["estadios"][est]["meses"]})
-    clima = (f"sensor (LEITURA_IOT): média mensal de todos os registros de "
-             f"{', '.join(meses)} · modelo {mom} ({ROTULO_MOMENTO[mom]})")
-    faltam = [e for e in ("vegetativo", "floracao", "enchimento") if e not in estadios_com]
-    if faltam:
-        nomes_est = {"vegetativo": "vegetativo", "floracao": "floração", "enchimento": "enchimento"}
-        avisos.append("estádios sem registro do sensor: " + ", ".join(nomes_est[x] for x in faltam) +
-                      f"; por isso a estimativa usa o modelo {mom}")
-    for est in estadios_com:
-        e = sensor["estadios"][est]
-        cob = f"{100 * e['valores']['cobertura']:.1f}".replace(".", ",")
-        nome_e = {"vegetativo": "vegetativo", "floracao": "floração", "enchimento": "enchimento"}[est]
-        avisos.append(f"{nome_e}: {e['leituras']} registros em {e['dias_com_leitura']} dia(s) de "
-                      f"{e['dias_do_estadio']} do estádio (cobertura {cob}%)")
-    if sensor["configs"]:
-        avisos.append("os registros do sensor estão ligados à(s) configuração(ões) "
-                      + ", ".join(str(c) for c in sensor["configs"])
-                      + "; confira se o sensor estava no município escolhido")
-    avisos.append("um mês que cruza dois estádios entra nos dois; graus-dia projetados como "
-                  "(temperatura média − 10 °C) × dias do estádio")
+
     # ---- solo e terreno: bloqueio (ZARC) antes de qualquer conta
     terreno = [ZARC_TERRENO[k] for k in ZARC_TERRENO if q.get(k, ["0"])[0] in ("1", "true", "on")]
-    if (regra and regra["situacao"] == "nao_indicado") or terreno:
-        motivos = ([regra["motivo"]] if regra and regra["situacao"] == "nao_indicado" else []) + \
+    if regra["situacao"] == "nao_indicado" or terreno:
+        motivos = ([regra["motivo"]] if regra["situacao"] == "nao_indicado" else []) + \
                   [f"o ZARC não indica áreas com {t}" for t in terreno]
         fontes = []
-        if regra and regra["situacao"] == "nao_indicado" and regra["fonte"]:
+        if regra["situacao"] == "nao_indicado" and regra["fonte"]:
             fontes.append(regra["fonte"])
         if terreno:
             fontes.append("Portarias ZARC (SPA/MAPA), seção Tipos de Solos Aptos ao Cultivo")
-        return {"bloqueado": True, "municipio": nome, "uf": uf, "cultura": cult,
-                "motivos": motivos, "fonte": " · ".join(fontes) or "—"}
+        return {**base, "bloqueado": True, "motivos": motivos, "fonte": " · ".join(fontes) or "—"}
 
     total, contrib, imput, aus = prever(linha, mom)
     fx = faixa(total, mom, cult)
-    pct = regra["ajuste_pct"] if regra else 0.0
+    pct = regra["ajuste_pct"]
     fator = 1 + pct / 100
 
     def producao(sc):
         return {"sacas_ha": sc, "sacas": sc * ha, "kg": sc * ha * KG_SACA,
                 "toneladas": sc * ha * KG_SACA / 1000}
 
-    solo = None
-    if q.get("solo", [""])[0]:
-        t = ler_sql("SELECT * FROM TIPO_SOLO WHERE id_solo = %s", (int(q["solo"][0]),))
-        if len(t):
-            solo = t.iloc[0].to_dict()
     avisos.insert(0, "o modelo foi treinado só com clima e histórico do município, sem solo; "
                      "o ajuste de solo é uma regra aplicada DEPOIS da previsão, definida na "
                      f"tabela {ARQ_AJUSTE}")
     if regra["situacao"] in ("aviso", "apto") and regra["motivo"]:
         avisos.insert(1, f"solo: {regra['motivo']}")
-    if pct and not (regra or {}).get("fonte"):
+    if pct and not regra.get("fonte"):
         avisos.insert(1, f"o ajuste de {pct:+.0f}% para este solo NÃO TEM FONTE na tabela; "
                          "é um parâmetro a validar antes de usar no TCC")
-    colheita = ciclo = None
-    if q.get("plantio", [""])[0]:
-        plantio = date.fromisoformat(q["plantio"][0])
-        cu = ler_sql("SELECT nome_cultura, ciclo_estimado_dias FROM CULTURA")
-        mapa = {f"{n} (em grão)": d for n, d in zip(cu.nome_cultura, cu.ciclo_estimado_dias)}
-        if cult in mapa and not vazio(mapa[cult]):
-            ciclo = int(mapa[cult])
-            colheita = plantio + timedelta(days=ciclo)
     if imput:
-        avisos.append(f"{len(imput)} variável(is) com peso no modelo não são medidas pelo sensor "
-                      "(chuva, radiação, vento, pressão, veranicos) e entraram com a mediana do treino")
-    avisos.append("a faixa vem dos erros reais do modelo fora da amostra (municípios que ele "
-                  "não viu); para prever a PRÓXIMA safra o modelo perde para a média histórica")
-    return {"municipio": nome, "uf": uf, "cultura": cult, "clima": clima,
+        quem = "pelo INMET neste ciclo" if passada else "pelo sensor"
+        avisos.append(f"{len(imput)} variável(is) com peso no modelo não foram medidas {quem} "
+                      "e entraram com a mediana do treino")
+    if passada:
+        avisos.append("a faixa vem dos erros reais do modelo fora da amostra (municípios que ele "
+                      "não viu)")
+    else:
+        avisos.append("a faixa vem dos erros reais do modelo fora da amostra (municípios que ele "
+                      "não viu); para prever a PRÓXIMA safra o modelo perde para a média histórica")
+    return {**base, **extra, "clima": clima,
             "area_informada": area, "unidade": unidade, "hectares": ha,
             "estimativa_modelo": producao(total),
             "estimativa": producao(total * fator),
             "faixa": {k: producao(v * fator) for k, v in fx.items()},
-            "ajuste_solo": {"pct": pct, "fonte": (regra or {}).get("fonte", ""),
-                            "situacao": (regra or {}).get("situacao", "apto")},
+            "ajuste_solo": {"pct": pct, "fonte": regra.get("fonte", ""),
+                            "situacao": regra.get("situacao", "apto")},
             "tradicional": producao(hist), "origem_tradicional": origem_hist,
             "realizado": producao(realizado) if realizado is not None else None,
-            "contribuicoes": contrib[:8], "solo": solo, "colheita": colheita,
-            "ciclo_dias": ciclo, "avisos": avisos, "momento": mom,
-            "mensal": sensor["mensal"],
-            "estadios": {k: {kk: v[kk] for kk in ("inicio", "fim", "meses", "dias_com_leitura",
-                                                  "dias_do_estadio", "leituras", "valores")}
-                         for k, v in sensor["estadios"].items()},
-            "sensor_resumo": {k: sensor[k] for k in ("leituras", "primeira", "ultima", "fora_do_ciclo", "configs")}}
+            "contribuicoes": contrib[:8], "solo": solo, "avisos": avisos, "momento": mom}
 
 
 # ===================================================== sensor ao vivo =======

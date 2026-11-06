@@ -101,8 +101,9 @@ code{font-size:12.5px}
   <section id="aba-calc" class="aba ativa">
     <div class="cartao">
       <h2>Quanto vou colher?</h2>
-      <div class="sub">Escolha o grão, o município, o solo, a área e a data de plantio. O clima vem sempre do
-        sensor (LEITURA_IOT): a média de cada mês sobre todos os registros do mês, encaixada nos estádios do ciclo.</div>
+      <div class="sub">Escolha o grão, o município, o solo, a área e a data de plantio. O clima depende da data:
+        <b>safra que já passou</b> (colheita antes de hoje) usa o clima daquele período, medido pelas estações do INMET
+        do município; <b>safra atual</b> usa o clima de agora, do sensor (LEITURA_IOT), em média mensal.</div>
       <div class="form" style="margin-top:12px">
         <label>Grão<select id="c-cult"></select></label>
         <label>Município<select id="c-mun"></select></label>
@@ -333,15 +334,19 @@ async function calcularProdutor() {
       return;
     }
     if (r.sem_dados) {
-      alvo.innerHTML = `<div class="cartao"><h2>${esc(r.cultura)} · ${esc(r.municipio)} / ${esc(r.uf)}</h2>
-        <div class="selo ruim"><b>Sem registros do sensor dentro deste ciclo.</b> ${esc(r.motivo)}.
-        O sensor tem ${r.sensor.leituras} registros, de ${esc(String(r.sensor.primeira || "—").replace("T", " ").slice(0, 16))}
-        a ${esc(String(r.sensor.ultima || "—").replace("T", " ").slice(0, 16))}.</div></div>`;
+      const det = r.fonte_clima === "inmet"
+        ? `<b>Sem clima do INMET para este ciclo:</b> ${esc(r.motivo)}.
+           Estações: ${esc((r.inmet.estacoes || []).join(", ") || "nenhuma ligada ao município")}.`
+        : `<b>Sem registros do sensor dentro deste ciclo:</b> ${esc(r.motivo)}.
+           O sensor tem ${r.sensor.leituras} registros, de ${esc(String(r.sensor.primeira || "—").replace("T", " ").slice(0, 16))}
+           a ${esc(String(r.sensor.ultima || "—").replace("T", " ").slice(0, 16))}.`;
+      alvo.innerHTML = `<div class="cartao"><h2>${esc(r.cultura)} · ${esc(r.municipio)} / ${esc(r.uf)} · safra ${r.ano_safra}</h2>
+        ${seloModo(r)}<div class="selo ruim">${det}</div></div>`;
       return;
     }
     const e = r.estimativa, f = r.faixa, t = r.tradicional, aj = r.ajuste_solo, em = r.estimativa_modelo;
     const NM = {vegetativo: "Vegetativo", floracao: "Floração", enchimento: "Enchimento"};
-    const tabMensal = `<h3>Clima de entrada: média mensal do sensor (todos os registros do mês, dentro do ciclo)</h3>
+    const tabMensal = r.fonte_clima === "inmet" ? tabInmet(r) : `<h3>Clima de entrada: média mensal do sensor (todos os registros do mês, dentro do ciclo)</h3>
       <table><tr><th>Mês</th><th class="n">Registros</th><th class="n">Dias</th><th class="n">Temp. média</th><th class="n">Máx.</th>
         <th class="n">Mín.</th><th class="n">Umid. média</th><th class="n">Umid. mín.</th><th class="n">VPD médio</th><th class="n">Amplitude diária</th></tr>
       ${r.mensal.map(m => `<tr><td>${esc(m.mes)}</td><td class="n">${m.leituras}</td><td class="n">${m.dias}</td>
@@ -354,7 +359,8 @@ async function calcularProdutor() {
     const area = r.unidade === "m2" ? `${fmt(r.area_informada, 0)} m² (${fmt(r.hectares, 4)} ha)` : `${fmt(r.hectares, 2)} ha`;
     const s = r.solo;
     alvo.innerHTML = `<div class="cartao">
-      <h2>${esc(r.cultura)} · ${esc(r.municipio)} / ${esc(r.uf)} · ${area}</h2>
+      <h2>${esc(r.cultura)} · ${esc(r.municipio)} / ${esc(r.uf)} · safra ${r.ano_safra} · ${area}</h2>
+      ${seloModo(r)}
       <div class="sub">${esc(r.clima)}</div>
       <div class="grade">
         <div class="kpi"><div class="r">Produtividade estimada${aj.pct ? " (com ajuste de solo)" : ""}</div><div class="v">${fmt(e.sacas_ha)} <span style="font-size:13px">sc/ha</span></div>
@@ -368,7 +374,8 @@ async function calcularProdutor() {
         ${r.colheita ? `<div class="kpi"><div class="r">Colheita estimada</div><div class="v">${dataBR(r.colheita)}</div>
           <div class="d">plantio + ${r.ciclo_dias} dias (regra de calendário)</div></div>` : ""}
         ${r.realizado ? `<div class="kpi ok"><div class="r">Realizado nessa safra (IBGE)</div><div class="v">${fmt(r.realizado.sacas_ha)} <span style="font-size:13px">sc/ha</span></div>
-          <div class="d">${fmt(r.realizado.sacas, e.sacas < 100 ? 1 : 0)} sacas na sua área</div></div>` : ""}
+          <div class="d">erro do modelo ${dif(em.sacas_ha - r.realizado.sacas_ha)} · do tradicional ${dif(t.sacas_ha - r.realizado.sacas_ha)} sc/ha
+          ${r.na_base_treino ? "<br><b>safra usada no treino</b>: comparação otimista" : ""}</div></div>` : ""}
       </div>
       <table><tr><th>Cenário</th><th class="n">sc/ha</th><th class="n">Sacas na área</th><th class="n">Toneladas</th></tr>
         ${[["Pessimista (10%)", f.p10], ["Provável baixo (25%)", f.p25], ["Central", e], ["Provável alto (75%)", f.p75], ["Otimista (90%)", f.p90]]
@@ -385,6 +392,35 @@ async function calcularProdutor() {
       <div class="nota">1 saca = 60 kg. A estimativa é a produtividade média do município; uma lavoura individual varia mais que a média.</div>
     </div>`;
   } catch (err) { alvo.innerHTML = `<div class="cartao erro">Erro: ${esc(err.message)}</div>`; }
+}
+
+/* -------------------------------------------- calculadora: modo e INMET ---- */
+const dif = v => (v >= 0 ? "+" : "−") + fmt(Math.abs(v));
+
+function seloModo(r) {
+  return r.modo === "passada"
+    ? `<div class="selo ok" style="margin:8px 0"><b>Safra passada</b> (colheita estimada ${dataBR(r.colheita)}, antes de hoje):
+        clima daquele período, das estações do INMET ligadas ao município.</div>`
+    : `<div class="selo" style="margin:8px 0;border-color:var(--modelo)"><b>Safra atual</b> (colheita estimada ${dataBR(r.colheita)}):
+        clima de agora, do sensor.</div>`;
+}
+
+function tabInmet(r) {
+  const inm = r.inmet, NM = {vegetativo: "Vegetativo", floracao: "Floração", enchimento: "Enchimento"};
+  const V = [["temp_media", "Temp. média (°C)", 1], ["temp_max_abs", "Temp. máx. (°C)", 1], ["temp_min_abs", "Temp. mín. (°C)", 1],
+    ["precipitacao_total_mm", "Chuva (mm)", 0], ["dias_com_chuva", "Dias com chuva", 0], ["maior_veranico", "Maior veranico (dias)", 0],
+    ["graus_dia_acum", "Graus-dia (°C·dia)", 0], ["radiacao_total_mjm2", "Radiação (MJ/m²)", 0],
+    ["umidade_media", "Umid. média (%)", 1], ["vpd_medio_kpa", "VPD médio (kPa)", 2], ["vento_medio", "Vento médio (m/s)", 1]];
+  const est = Object.entries(r.estadios);
+  return `<h3>Clima de entrada: INMET, semana a semana, agregado por estádio (regras do treino)</h3>
+    <table><tr><th></th>${est.map(([k]) => `<th class="n">${NM[k]}</th>`).join("")}</tr>
+      <tr><td>Período</td>${est.map(([, v]) => `<td class="n">${dataBR(v.inicio)} a ${dataBR(v.fim)}</td>`).join("")}</tr>
+      <tr><td>Semanas com dado</td>${est.map(([, v]) => `<td class="n">${v.semanas_validas} de ${v.semanas}</td>`).join("")}</tr>
+      ${V.map(([c, rot, cas]) => `<tr><td>${rot}</td>${est.map(([, v]) =>
+        `<td class="n">${v.valores && v.valores[c] != null ? fmt(v.valores[c], cas) : "—"}</td>`).join("")}</tr>`).join("")}</table>
+    <div class="nota">Estações: ${esc(inm.estacoes.join(", ") || "—")} (dados no banco de ${dataBR(inm.dados_de)} a ${dataBR(inm.dados_ate)}).
+      Cobertura do ciclo: ${inm.semanas_validas} de ${inm.semanas_esperadas} semanas (${fmt(100 * inm.cobertura_ciclo, 0)}%).
+      Modelo usado: ${r.momento}.</div>`;
 }
 
 /* ---------------------------------------------------- sensor (IoT) ---- */
