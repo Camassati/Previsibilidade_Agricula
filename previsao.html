@@ -695,7 +695,7 @@ function desenharSensor(d) {
               `${fmt(dia.temp_min)}–${fmt(dia.temp_max)} °C · ${fmt(dia.umid_min)}–${fmt(dia.umid_max)}%`, "trad") : ""}
       </div>
       <div class="nota">Janela: ${nJan.toLocaleString("pt-BR")} leituras de ${hhmmss(SV.leituras[0].hora)} a ${hhmmss(u.hora)},
-        contadas para trás a partir da última leitura. Intervalos maiores que ${FALHA_GAP_S} s aparecem como quebra na linha (falha de coleta).</div>
+        contadas para trás a partir da última leitura. Quebras na linha indicam falha de coleta (buraco bem maior que o ritmo normal da janela).</div>
     </div>
     <div class="duas">
       <div class="cartao"><h2>Temperatura</h2><div class="sub">°C</div><div class="graf" id="g-temp"></div></div>
@@ -723,9 +723,15 @@ function graficoLinha(alvo, dados, campo, un, casas) {
   const folga = Math.max((hi - lo) * 0.15, 0.5); lo -= folga; hi += folga;
   const x = t => mE + (t - t0) / (t1 - t0) * (W - mE - mD);
   const y = v => mT + (hi - v) / (hi - lo) * (H - mT - mB);
+  // limite de quebra adaptado à cadência real das leituras: uma falha é um buraco
+  // bem maior que o ritmo normal da janela. Assim a linha não se parte quando as
+  // leituras chegam de minuto em minuto (e não de 5 em 5 s).
+  const gapsS = pts.slice(1).map((p, i) => (p.t - pts[i].t) / 1000).sort((a, b) => a - b);
+  const cadencia = gapsS.length ? gapsS[Math.floor(gapsS.length / 2)] : FALHA_GAP_S;
+  const limiteQuebra = Math.max(FALHA_GAP_S, cadencia * 2.5);
   let caminho = "";
   pts.forEach((p, i) => {
-    const quebra = i === 0 || (p.t - pts[i - 1].t) / 1000 > FALHA_GAP_S;
+    const quebra = i === 0 || (p.t - pts[i - 1].t) / 1000 > limiteQuebra;
     caminho += `${quebra ? "M" : "L"}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`;
   });
   const passoY = (() => { const r = (hi - lo) / 4, e = 10 ** Math.floor(Math.log10(r)); return [1, 2, 5, 10].map(m => m * e).find(s => s >= r); })();
@@ -742,7 +748,7 @@ function graficoLinha(alvo, dados, campo, un, casas) {
   alvo.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${campo === "temp" ? "Temperatura" : "Umidade"} na janela">
       ${grade}<line x1="${mE}" x2="${W - mD}" y1="${H - mB}" y2="${H - mB}" stroke="var(--linha)"/>${eixoX}
       <path d="${caminho}" fill="none" stroke="var(--modelo)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-      ${pts.length === 1 || (pts.length > 1 && (ult.t - pts[pts.length - 2].t) / 1000 > FALHA_GAP_S) ?
+      ${pts.length === 1 || (pts.length > 1 && (ult.t - pts[pts.length - 2].t) / 1000 > limiteQuebra) ?
         `<circle cx="${x(ult.t)}" cy="${y(ult.v)}" r="4" fill="var(--modelo)" stroke="var(--cartao)" stroke-width="2"/>` : ""}
       <g class="mira" style="display:none"><line y1="${mT}" y2="${H - mB}" stroke="var(--mudo)" stroke-dasharray="3 3"/>
         <circle r="4.5" fill="var(--modelo)" stroke="var(--cartao)" stroke-width="2"/></g>
