@@ -904,8 +904,14 @@ def api_calcular(q):
 
 
 # ===================================================== sensor ao vivo =======
-AO_VIVO_S = 30          # última leitura há até 30 s  -> "ao vivo" (o nó grava a cada 5 s)
-ATRASADO_S = 300        # até 5 min                  -> "atrasado"; acima disso, "parado"
+# A situação depende do RITMO REAL do sensor, medido nas últimas leituras: o nó
+# já gravou a cada 5 s (05/10) e hoje grava a cada ~30 min (09/11). Um limite
+# fixo de 30 s mostrava "Parado" com o sensor ligado.
+AO_VIVO_MIN_S = 30      # piso: nunca menos que 30 s
+ATRASADO_MIN_S = 300    # piso: nunca menos que 5 min
+FATOR_AO_VIVO = 1.5     # até 1,5 x o intervalo típico -> "ao vivo"
+FATOR_ATRASADO = 3.0    # até 3 x                    -> "atrasado"; acima, "parado"
+N_INTERVALOS = 20       # intervalo típico = mediana dos últimos 20 intervalos
 MAX_LINHAS_POLL = 5000  # teto por consulta, para nunca puxar a tabela inteira
 
 
@@ -932,7 +938,7 @@ def api_sensor_ao_vivo(q):
                  f"(SELECT MAX(data_hora) FROM LEITURA_IOT) - INTERVAL %s MINUTE "
                  f"ORDER BY id_leitura LIMIT {MAX_LINHAS_POLL}")
         args_l = (janela,)
-    est, lei, dia, cfg = ler_varios([
+    est, lei, dia, cfg, rec = ler_varios([
         ("""SELECT COUNT(*) AS total, MAX(id_leitura) AS ultimo_id,
                    MAX(data_hora) AS ultima, NOW() AS agora_banco,
                    TIMESTAMPDIFF(SECOND, MAX(data_hora), NOW()) AS idade_s
@@ -951,15 +957,26 @@ def api_sensor_ao_vivo(q):
               JOIN CULTURA cu ON cu.id_cultura = c.id_cultura
              WHERE c.id_config = (SELECT id_config FROM LEITURA_IOT
                                    ORDER BY id_leitura DESC LIMIT 1)""", None),
+        (f"""SELECT data_hora FROM LEITURA_IOT
+              ORDER BY id_leitura DESC LIMIT {N_INTERVALOS + 1}""", None),
     ])
     e = est.iloc[0]
     total = int(e.total or 0)
     idade = None if e.idade_s is None or vazio(e.idade_s) else int(e.idade_s)
+    intervalo = None
+    if len(rec) >= 2:
+        h = pd.to_datetime(rec.data_hora).sort_values()
+        dif = h.diff().dt.total_seconds().dropna()
+        dif = dif[dif > 0]
+        if len(dif):
+            intervalo = float(dif.median())
+    ao_vivo_s = max(AO_VIVO_MIN_S, FATOR_AO_VIVO * intervalo) if intervalo else AO_VIVO_MIN_S
+    atrasado_s = max(ATRASADO_MIN_S, FATOR_ATRASADO * intervalo) if intervalo else ATRASADO_MIN_S
     if total == 0:
         situacao = "sem_leituras"
-    elif idade is not None and idade <= AO_VIVO_S:
+    elif idade is not None and idade <= ao_vivo_s:
         situacao = "ao_vivo"
-    elif idade is not None and idade <= ATRASADO_S:
+    elif idade is not None and idade <= atrasado_s:
         situacao = "atrasado"
     else:
         situacao = "parado"
@@ -991,7 +1008,10 @@ def api_sensor_ao_vivo(q):
             "janela_min": janela, "incremental": desde > 0,
             "truncado": len(leituras) >= MAX_LINHAS_POLL,
             "leituras": leituras, "dia": resumo_dia, "local": local,
-            "limites": {"ao_vivo_s": AO_VIVO_S, "atrasado_s": ATRASADO_S}}
+            "intervalo_s": intervalo,
+            "proxima": (_txt_hora(pd.Timestamp(e.ultima) + pd.Timedelta(seconds=intervalo))
+                        if intervalo and e.ultima is not None else None),
+            "limites": {"ao_vivo_s": ao_vivo_s, "atrasado_s": atrasado_s}}
 
 
 ROTAS = {"/api/estado": api_estado, "/api/opcoes": api_opcoes,

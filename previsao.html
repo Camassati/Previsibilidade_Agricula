@@ -142,12 +142,12 @@ code{font-size:12.5px}
         <div>
           <h2>Sensor ao vivo</h2>
           <div class="sub">Leituras do nó sensor (DHT22) direto da tabela <code>LEITURA_IOT</code>, só leitura.
-            A página consulta o banco a cada 5 s enquanto esta aba está aberta e busca só as leituras novas.</div>
+            A página consulta o banco enquanto esta aba está aberta (a cada 5 s, ou a cada 30 s quando o sensor grava devagar) e busca só as leituras novas.</div>
         </div>
         <div class="form">
           <label>Janela<select id="s-janela" style="min-width:120px">
-            <option value="15">15 min</option><option value="60" selected>1 hora</option>
-            <option value="360">6 horas</option><option value="1440">24 horas</option></select></label>
+            <option value="15">15 min</option><option value="60">1 hora</option>
+            <option value="360">6 horas</option><option value="1440" selected>24 horas</option></select></label>
           <button type="button" id="s-pausa" class="botao2">Pausar</button>
         </div>
       </div>
@@ -337,8 +337,7 @@ async function calcularProdutor() {
           <div class="d">${fmt(e.toneladas, 2)} t · faixa ${fmt(f.p25.sacas, e.sacas < 100 ? 1 : 0)} a ${fmt(f.p75.sacas, e.sacas < 100 ? 1 : 0)} sacas</div></div>
         <div class="kpi trad"><div class="r">Método tradicional</div><div class="v">${fmt(t.sacas_ha)} <span style="font-size:13px">sc/ha</span></div>
           <div class="d">${esc(r.origem_tradicional)} · ${fmt(t.sacas, e.sacas < 100 ? 1 : 0)} sacas</div></div>
-        ${r.colheita ? `<div class="kpi"><div class="r">Colheita estimada</div><div class="v">${dataBR(r.colheita)}</div>
-          <div class="d">plantio + ${r.ciclo_dias} dias (regra de calendário)</div></div>` : ""}
+        ${r.colheita ? `<div class="kpi"><div class="r">Colheita estimada</div><div class="v">${dataBR(r.colheita)}</div></div>` : ""}
         ${r.realizado ? `<div class="kpi ok"><div class="r">Realizado nessa safra (IBGE)</div><div class="v">${fmt(r.realizado.sacas_ha)} <span style="font-size:13px">sc/ha</span></div>
           <div class="d">erro do modelo ${dif(e.sacas_ha - r.realizado.sacas_ha)} · do tradicional ${dif(t.sacas_ha - r.realizado.sacas_ha)} sc/ha
           ${r.na_base_treino ? "<br><b>safra usada no treino</b>: comparação otimista" : ""}</div></div>` : ""}
@@ -572,9 +571,11 @@ async function carregarDesempenho() {
 }
 
 /* ------------------------------------------------------ sensor ao vivo ---- */
-const SV = {ultimo: 0, leituras: [], janela: 60, timer: null, pausado: false, emCurso: false, ultimaResp: null};
+const SV = {ultimo: 0, leituras: [], janela: 1440, pollMs: 5000, timer: null, pausado: false, emCurso: false, ultimaResp: null};
 const INTERVALO_MS = 5000;
-const FALHA_GAP_S = 60;   // mesmo critério do diagnóstico: intervalo > 60 s é falha de coleta
+// Quebra na linha = intervalo maior que 3x o ritmo típico do sensor (no mínimo
+// 60 s). O ritmo vem do servidor (mediana dos últimos 20 intervalos).
+let FALHA_GAP_S = 60;
 const hora = s => new Date(s.replace(" ", "T"));
 const hhmm = d => d.toLocaleTimeString("pt-BR", {hour: "2-digit", minute: "2-digit"});
 const hhmmss = s => s ? s.slice(11) : "—";
@@ -583,7 +584,7 @@ const dataHoraBR = s => s ? `${dataBR(s.slice(0, 10))} ${s.slice(11)}` : "—";
 function fmtIdade(s) {
   if (s == null) return "—";
   if (s < 60) return `${s} s`;
-  if (s < 3600) return `${Math.floor(s / 60)} min ${s % 60} s`;
+  if (s < 3600) return s % 60 && s < 600 ? `${Math.floor(s / 60)} min ${s % 60} s` : `${Math.floor(s / 60)} min`;
   if (s < 86400) return `${Math.floor(s / 3600)} h ${Math.floor(s % 3600 / 60)} min`;
   const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600);
   return `${d} ${d === 1 ? "dia" : "dias"}${h ? ` e ${h} h` : ""}`;
@@ -591,7 +592,7 @@ function fmtIdade(s) {
 
 function sensorVisivel() { return $("#aba-sensor").classList.contains("ativa") && !document.hidden; }
 
-function agendarSensor(ms = INTERVALO_MS) {
+function agendarSensor(ms = SV.pollMs) {
   clearTimeout(SV.timer);
   if (sensorVisivel() && !SV.pausado) SV.timer = setTimeout(() => consultarSensor(false), ms);
 }
@@ -601,10 +602,15 @@ async function consultarSensor(reiniciar) {
   SV.emCurso = true;
   if (SV.reiniciarPendente) { reiniciar = true; SV.reiniciarPendente = false; }
   if (reiniciar) { SV.ultimo = 0; SV.leituras = []; }
-  let espera = INTERVALO_MS;
+  let espera = SV.pollMs;
   try {
     const d = await api(`/api/sensor?desde=${SV.ultimo}&janela=${SV.janela}`);
     SV.ultimaResp = d;
+    if (d.intervalo_s) {
+      FALHA_GAP_S = Math.max(60, 3 * d.intervalo_s);
+      SV.pollMs = d.intervalo_s >= 300 ? 30000 : INTERVALO_MS;
+      espera = SV.pollMs;
+    }
     if (d.leituras.length) SV.leituras.push(...d.leituras);
     const ultLida = d.leituras.length ? d.leituras[d.leituras.length - 1].id : 0;
     SV.ultimo = d.truncado ? ultLida : Math.max(SV.ultimo, ultLida, d.ultimo_id || 0);
@@ -629,9 +635,13 @@ function desenharSensor(d) {
   const rot = {ao_vivo: "Ao vivo", atrasado: "Atrasado", parado: "Parado", sem_leituras: "Sem leituras"}[d.situacao];
   let frase;
   if (d.situacao === "sem_leituras") frase = "A tabela LEITURA_IOT está vazia.";
-  else if (d.situacao === "ao_vivo") frase = `Última leitura há ${fmtIdade(d.idade_s)} (${dataHoraBR(d.ultima)}).`;
-  else frase = `O sensor não envia leitura há ${fmtIdade(d.idade_s)}. Última: ${dataHoraBR(d.ultima)}.
-    Os gráficos mostram a última janela registrada; quando ele voltar a gravar, a tela atualiza sozinha.`;
+  else {
+    const ritmo = d.intervalo_s ? ` O sensor grava a cada ${fmtIdade(Math.round(d.intervalo_s))}, pelas últimas leituras.` : "";
+    if (d.situacao === "ao_vivo") frase = `Última leitura há ${fmtIdade(d.idade_s)} (${dataHoraBR(d.ultima)}).${ritmo}` +
+      (d.proxima ? ` Próxima esperada por volta de ${d.proxima.slice(11, 16)}.` : "");
+    else frase = `O sensor não envia leitura há ${fmtIdade(d.idade_s)}. Última: ${dataHoraBR(d.ultima)}.${ritmo}
+      Os gráficos mostram a última janela registrada; quando ele voltar a gravar, a tela atualiza sozinha.`;
+  }
   $("#s-status").innerHTML = `<span class="pilula ${d.situacao}">${rot}</span>
     <span style="margin-left:10px;font-size:13.5px">${frase}</span>
 `;
@@ -653,7 +663,7 @@ function desenharSensor(d) {
               `${fmt(dia.temp_min)}–${fmt(dia.temp_max)} °C · ${fmt(dia.umid_min)}–${fmt(dia.umid_max)}%`, "trad") : ""}
       </div>
       <div class="nota">Janela: ${nJan.toLocaleString("pt-BR")} leituras de ${hhmmss(SV.leituras[0].hora)} a ${hhmmss(u.hora)},
-        contadas para trás a partir da última leitura. Intervalos maiores que ${FALHA_GAP_S} s aparecem como quebra na linha (falha de coleta).</div>
+        contadas para trás a partir da última leitura. Intervalos maiores que ${fmtIdade(Math.round(FALHA_GAP_S))} (3 vezes o ritmo do sensor) aparecem como quebra na linha (falha de coleta).</div>
     </div>
     <div class="duas">
       <div class="cartao"><h2>Temperatura</h2><div class="sub">°C</div><div class="graf" id="g-temp"></div></div>
@@ -700,6 +710,7 @@ function graficoLinha(alvo, dados, campo, un, casas) {
   alvo.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${campo === "temp" ? "Temperatura" : "Umidade"} na janela">
       ${grade}<line x1="${mE}" x2="${W - mD}" y1="${H - mB}" y2="${H - mB}" stroke="var(--linha)"/>${eixoX}
       <path d="${caminho}" fill="none" stroke="var(--modelo)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+      ${pts.length <= 120 ? pts.map(p => `<circle cx="${x(p.t).toFixed(1)}" cy="${y(p.v).toFixed(1)}" r="3" fill="var(--modelo)"/>`).join("") : ""}
       ${pts.length === 1 || (pts.length > 1 && (ult.t - pts[pts.length - 2].t) / 1000 > FALHA_GAP_S) ?
         `<circle cx="${x(ult.t)}" cy="${y(ult.v)}" r="4" fill="var(--modelo)" stroke="var(--cartao)" stroke-width="2"/>` : ""}
       <g class="mira" style="display:none"><line y1="${mT}" y2="${H - mB}" stroke="var(--mudo)" stroke-dasharray="3 3"/>
