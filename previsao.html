@@ -4,19 +4,35 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Previsão de Colheita</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..700&family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
 :root{
-  --fundo:#f6f5f1; --cartao:#ffffff; --tinta:#1c2119; --sec:#4f5649; --mudo:#858c7c;
-  --linha:#e0ded6; --linha2:#eeece5; --modelo:#2a78d6; --faixa:#cfe0f5;
-  --ok:#1f8a4c; --okf:#e7f4ec; --alerta:#b4501f; --alertaf:#fbefe7; --trad:#7d8575;
-  --real:#1c2119; --erro:#a3271f; --errof:#fbeceb;
+  /* campo: palha clara, terra escura, folha, grão de milho, céu */
+  --fundo:#eef1ea; --cartao:#fbfcf9; --tinta:#1e2418; --sec:#4c5444; --mudo:#7d8574;
+  --linha:#d9ded2; --linha2:#e8ebe3;
+  --modelo:#2f6b3f; --folha:#2f6b3f; --folhaf:#e3eee5;
+  --grao:#d99a12; --graof:#f6e4b8; --grao2:#b47a00;
+  --ceu:#3a78a0; --ceuf:#e2edf4;
+  --faixa:#f6e4b8;
+  --ok:#2f6b3f; --okf:#e3eee5; --alerta:#a4561f; --alertaf:#f7ebe1; --trad:#8b8676;
+  --real:#1e2418; --erro:#a3271f; --errof:#f8e9e7;
+  --veg:#7fb069; --flo:#e3c04b; --enc:#d99a12;
+  --display:"Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --texto:"Source Sans 3", "Segoe UI", system-ui, sans-serif;
 }
 @media (prefers-color-scheme: dark){
   :root:not([data-theme="light"]){
-    --fundo:#151814; --cartao:#1e221c; --tinta:#eceee8; --sec:#c3c8bb; --mudo:#8e9686;
-    --linha:#343a31; --linha2:#2a2f27; --modelo:#5b9cf0; --faixa:#26405f;
-    --ok:#5cc28a; --okf:#1d3326; --alerta:#e08a5a; --alertaf:#3a271c; --trad:#9aa291;
-    --real:#eceee8; --erro:#f08a82; --errof:#3a1f1d;
+    --fundo:#141811; --cartao:#1c2118; --tinta:#eceee6; --sec:#c2c8b8; --mudo:#8f9886;
+    --linha:#323a2c; --linha2:#272d22;
+    --modelo:#7cc08d; --folha:#7cc08d; --folhaf:#1f3324;
+    --grao:#f0b93a; --graof:#4a3a14; --grao2:#f0b93a;
+    --ceu:#7fb6dc; --ceuf:#1c2f3c;
+    --faixa:#4a3a14;
+    --ok:#7cc08d; --okf:#1f3324; --alerta:#e3925c; --alertaf:#3a281b; --trad:#a7a28f;
+    --real:#eceee6; --erro:#f08a82; --errof:#3a1f1d;
+    --veg:#6ea25a; --flo:#c9a93a; --enc:#e0a52a;
   }
 }
 *{box-sizing:border-box}
@@ -80,6 +96,101 @@ code{font-size:12.5px}
   border-radius:8px;padding:5px 9px;font-size:12.5px;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.12);display:none}
 .botao2{font:inherit;padding:7px 14px;border:1px solid var(--linha);border-radius:8px;background:var(--cartao);
   color:var(--tinta);cursor:pointer}
+
+/* ------------------------------------------------ calculadora (visual) --- */
+body{font-family:var(--texto);font-size:16px}
+h1,.cartao h2,.titulo-res,.numero-grande,.prod .v{font-family:var(--display)}
+h1{font-size:26px;letter-spacing:-.02em}
+th{text-transform:none;letter-spacing:0;font-size:12.5px}
+.campos{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin-top:14px;align-items:end}
+.campos label{display:flex;flex-direction:column;gap:5px;font-size:13px;color:var(--sec);font-weight:600}
+.campos select,.campos input{font:inherit;font-weight:400;padding:9px 10px;border:1px solid var(--linha);border-radius:10px;
+  background:var(--cartao);color:var(--tinta);min-width:0;width:100%}
+.area-un{display:flex;gap:6px}.area-un input{flex:1}.area-un select{width:auto}
+.btn-calc{font:inherit;font-weight:700;padding:11px 20px;border:0;border-radius:10px;background:var(--folha);color:#fff;cursor:pointer}
+.btn-calc:hover{filter:brightness(1.08)}
+:focus-visible{outline:3px solid var(--grao);outline-offset:2px}
+.ajuda{font-size:14px;color:var(--sec);max-width:72ch;margin:4px 0 0}
+
+.res{background:var(--cartao);border:1px solid var(--linha);border-radius:16px;margin-bottom:16px;overflow:hidden}
+.res-topo{display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:baseline;padding:18px 22px 0}
+.titulo-res{font-size:20px;font-weight:650;margin:0;letter-spacing:-.01em}
+.chip{display:inline-flex;align-items:center;gap:8px;font-size:13.5px;font-weight:600;padding:5px 12px;border-radius:999px}
+.chip::before{content:"";width:9px;height:9px;border-radius:50%;background:currentColor}
+.chip.sensor{background:var(--ceuf);color:var(--ceu)}
+.chip.inmet{background:var(--folhaf);color:var(--folha)}
+.heroi{display:grid;grid-template-columns:1.5fr 1fr;gap:10px 28px;padding:14px 22px 20px}
+@media (max-width:760px){.heroi{grid-template-columns:1fr}}
+.numero-grande{font-size:64px;font-weight:700;line-height:1;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.numero-grande small{display:inline-block;font-size:22px;font-weight:600;color:var(--sec);letter-spacing:0;margin-left:6px}
+.legenda-num{font-size:14px;color:var(--sec);margin-top:6px}
+.barra-faixa{margin-top:18px}
+
+
+
+.prod{display:flex;flex-direction:column;gap:12px;justify-content:center;border-left:1px solid var(--linha2);padding-left:24px}
+@media (max-width:760px){.prod{border-left:0;padding-left:0;border-top:1px solid var(--linha2);padding-top:14px}}
+.prod .r{font-size:13px;color:var(--mudo)}
+.prod .v{font-size:30px;font-weight:650;line-height:1.1;font-variant-numeric:tabular-nums}
+.prod .v small{font-size:15px;color:var(--sec);font-weight:600;margin-left:4px}
+.compara{margin:0 22px 18px;padding:12px 16px;border-radius:12px;background:var(--linha2);font-size:14.5px;line-height:1.45}
+.compara b{font-weight:700}
+.bloco{padding:18px 22px;border-top:1px solid var(--linha2)}
+.bloco h3{font-family:var(--display);font-size:17px;font-weight:650;margin:0 0 4px;color:var(--tinta)}
+.bloco .ajuda{margin-bottom:12px}
+
+
+
+.estadios{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:14px}
+@media (max-width:760px){.estadios{grid-template-columns:1fr}}
+.est{border-radius:12px;padding:12px 14px;background:var(--fundo);border-top:4px solid var(--c)}
+.est.vazio{opacity:.6;border-top-style:dashed}
+.est h4{margin:0;font-size:15px;font-family:var(--display);font-weight:650}
+.est .quando{font-size:12.5px;color:var(--mudo);margin-bottom:8px}
+.est dl{display:grid;grid-template-columns:1fr auto;gap:3px 10px;margin:0;font-size:14px}
+.est dt{color:var(--sec)}.est dd{margin:0;font-weight:650;font-variant-numeric:tabular-nums;text-align:right}
+.est .sem{font-size:13.5px;color:var(--mudo)}
+.pesos{display:grid;grid-template-columns:minmax(150px,1.1fr) 2fr 58px;gap:7px 12px;align-items:center;font-size:14px}
+.pesos .nome{color:var(--sec)}
+.pesos .trilho{position:relative;height:14px}
+.pesos .trilho::before{content:"";position:absolute;left:50%;top:-3px;bottom:-3px;border-left:1px solid var(--linha)}
+.pesos .b{position:absolute;top:0;height:14px;border-radius:4px}
+.pesos .b.mais{left:50%;background:var(--folha)}.pesos .b.menos{right:50%;background:var(--alerta)}
+.pesos .val{text-align:right;font-weight:650;font-variant-numeric:tabular-nums}
+.pesos-leg{display:flex;justify-content:space-between;font-size:12.5px;color:var(--mudo)}
+details.mais{border-top:1px solid var(--linha2)}
+details.mais summary{cursor:pointer;padding:14px 22px;font-weight:650;color:var(--sec);list-style-position:inside}
+details.mais > div{padding:0 22px 18px}
+.adendos{padding:16px 22px 20px;border-top:1px solid var(--linha2);background:var(--fundo)}
+.adendos h3{font-size:14.5px;margin:0 0 6px;color:var(--sec);font-family:var(--texto);font-weight:700}
+.adendos ul{margin:0;padding-left:18px;font-size:13.5px;color:var(--sec);columns:2;column-gap:32px}
+@media (max-width:760px){.adendos ul{columns:1}}
+.adendos li{margin:0 0 6px;break-inside:avoid}
+
+.fx{position:relative;height:84px;margin:4px 6px 0;font-size:12.5px;color:var(--sec)}
+.fx-eixo{position:absolute;left:0;right:0;top:18px;border-top:2px solid var(--linha)}
+.fx-largo{position:absolute;top:14px;height:10px;border-radius:5px;background:var(--graof)}
+.fx-meio{position:absolute;top:10px;height:18px;border-radius:7px;background:var(--grao)}
+.fx-central{position:absolute;top:3px;width:4px;height:32px;margin-left:-2px;border-radius:2px;background:var(--tinta)}
+.fx-leg{font-size:12.5px;color:var(--sec)}
+.fx-rot.fim{transform:translateX(-100%)}
+.mk{position:absolute;top:38px;width:12px;height:12px;margin-left:-6px}
+.mk.trad{background:var(--trad);transform:rotate(45deg);border-radius:2px}
+.mk.real{background:var(--tinta);border-radius:50%}
+.mk-rot{position:absolute;white-space:nowrap}
+.mk-rot.l1{top:52px}.mk-rot.l2{top:68px}
+.mk-rot.meio{transform:translateX(-50%)}.mk-rot.fim{transform:translateX(-100%)}.mk-rot.inicio{transform:translateX(-6px)}
+.tl{position:relative;margin-top:26px}
+.fases{display:flex;gap:3px}
+.fase{min-width:0;height:36px;border-radius:8px;background:var(--c);display:flex;align-items:center;justify-content:center;
+  font-weight:700;font-size:14px;color:#1e2418;overflow:hidden}
+.fase span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 6px}
+.fase.sem-dado{background:repeating-linear-gradient(45deg,var(--cartao) 0 6px,var(--linha2) 6px 12px);
+  border:2px dashed var(--c);color:var(--tinta)}
+.hoje{position:absolute;top:-22px;bottom:-6px;border-left:2px solid var(--tinta)}
+.hoje span{position:absolute;top:0;left:4px;font-size:13px;font-weight:700;color:var(--tinta)}
+.tl-pontas{display:flex;justify-content:space-between;font-size:13.5px;color:var(--sec);margin-top:8px}
+@media (max-width:760px){.numero-grande{font-size:52px}.fase{font-size:12.5px}}
 </style>
 </head>
 <body>
@@ -101,18 +212,15 @@ code{font-size:12.5px}
   <section id="aba-calc" class="aba ativa">
     <div class="cartao">
       <h2>Quanto vou colher?</h2>
-      <div class="sub">Escolha o grão, o município, a área e a data de plantio. O clima depende da data:
-        <b>safra que já passou</b> (colheita antes de hoje) usa o clima daquele período, medido pelas estações do INMET
-        do município; <b>safra atual</b> usa o clima de agora, do sensor (LEITURA_IOT), em média mensal.</div>
-      <div class="form" style="margin-top:12px">
+      <p class="ajuda">Informe o grão, o município, a área e o dia do plantio. Se a safra já foi colhida, o cálculo usa o
+        clima que as estações do INMET mediram naquele período; se ainda está em curso, usa o clima de agora, do sensor.</p>
+      <div class="campos">
         <label>Grão<select id="c-cult"></select></label>
-        <label>Município<select id="c-mun"></select></label>
-        <label>Área<input id="c-area" type="number" min="0" step="any" value="10000"
-          style="font:inherit;padding:7px 9px;border:1px solid var(--linha);border-radius:8px;width:130px;background:var(--cartao);color:var(--tinta)"></label>
-        <label>Unidade<select id="c-un"><option value="m2">m²</option><option value="ha">hectares</option></select></label>
-        <label>Plantio<input id="c-plantio" type="date" value="2026-09-21"
-          style="font:inherit;padding:6px 9px;border:1px solid var(--linha);border-radius:8px;background:var(--cartao);color:var(--tinta)"></label>
-        <button id="c-btn" style="font:inherit;padding:8px 18px;border:0;border-radius:8px;background:var(--modelo);color:#fff;cursor:pointer;font-weight:600">Calcular</button>
+        <label style="grid-column:span 2">Município<select id="c-mun"></select></label>
+        <label>Área<span class="area-un"><input id="c-area" type="number" min="0" step="any" value="10000">
+          <select id="c-un" aria-label="Unidade da área"><option value="m2">m²</option><option value="ha">ha</option></select></span></label>
+        <label>Data do plantio<input id="c-plantio" type="date" value="2026-09-21"></label>
+        <button id="c-btn" class="btn-calc">Calcular colheita</button>
       </div>
     </div>
     <div id="calc"></div>
@@ -241,11 +349,23 @@ function svgProgressao(p) {
       faixa: erros reais do modelo fora da amostra, 25–75% e 10–90%</div>`;
 }
 
+const NOME_VAR = {
+  temp_media: "Temperatura média", temp_max_abs: "Temperatura máxima", temp_min_abs: "Temperatura mínima",
+  amplitude_termica: "Amplitude térmica", graus_dia_acum: "Graus-dia acumulados",
+  precipitacao_total_mm: "Chuva acumulada", dias_com_chuva: "Dias com chuva", maior_veranico: "Maior veranico",
+  dias_secos_acumulados: "Dias secos", umidade_media: "Umidade média", umidade_min_abs: "Umidade mínima",
+  vpd_medio_kpa: "Secura do ar (média)", vpd_max_kpa: "Secura do ar (pico)", pressao_media: "Pressão atmosférica",
+  vento_medio: "Vento médio", vento_rajada_max: "Rajada de vento", radiacao_total_mjm2: "Radiação solar",
+  cobertura: "Dias com medição",
+};
+const NOME_EST_V = {vegetativo: "no vegetativo", floracao: "na floração", enchimento: "no enchimento"};
 function rotuloVar(v) {
-  if (v === "base_hist") return "histórico do município";
-  const est = {vegetativo: "vegetativo", floracao: "floração", enchimento: "enchimento"};
-  for (const k in est) if (v.startsWith(k + "_")) return est[k] + " · " + v.slice(k.length + 1).replaceAll("_", " ");
-  return v.replaceAll("_", " ");
+  if (v === "base_hist") return "Histórico do município";
+  for (const k in NOME_EST_V) if (v.startsWith(k + "_")) {
+    const r = v.slice(k.length + 1);
+    return `${NOME_VAR[r] || r.replaceAll("_", " ")} ${NOME_EST_V[k]}`;
+  }
+  return NOME_VAR[v] || v.replaceAll("_", " ");
 }
 
 function svgContrib(lista) {
@@ -304,83 +424,200 @@ async function calcularProdutor() {
     const r = await api("/api/calcular?" + ps);
     if (r.sem_dados) {
       const det = r.fonte_clima === "inmet"
-        ? `<b>Sem clima do INMET para este ciclo:</b> ${esc(r.motivo)}.
-           Estações: ${esc((r.inmet.estacoes || []).join(", ") || "nenhuma ligada ao município")}.`
-        : `<b>Sem registros do sensor dentro deste ciclo:</b> ${esc(r.motivo)}.
-           O sensor tem ${r.sensor.leituras} registros, de ${esc(String(r.sensor.primeira || "—").replace("T", " ").slice(0, 16))}
+        ? `Não há clima do INMET no banco para este ciclo: ${esc(r.motivo)}.
+           Estações do município: ${esc((r.inmet.estacoes || []).join(", ") || "nenhuma")}.`
+        : `Nenhuma leitura do sensor cai dentro deste ciclo: ${esc(r.motivo)}.
+           O sensor tem ${r.sensor.leituras} leituras, de ${esc(String(r.sensor.primeira || "—").replace("T", " ").slice(0, 16))}
            a ${esc(String(r.sensor.ultima || "—").replace("T", " ").slice(0, 16))}.`;
-      alvo.innerHTML = `<div class="cartao"><h2>${esc(r.cultura)} · ${esc(r.municipio)} / ${esc(r.uf)} · safra ${r.ano_safra}</h2>
-        ${seloModo(r)}<div class="selo ruim">${det}</div></div>`;
+      alvo.innerHTML = `<div class="res"><div class="res-topo"><h2 class="titulo-res">${tituloRes(r)}</h2>${chipModo(r)}</div>
+        <div class="bloco"><div class="selo ruim" style="margin:0">${det} Tente outra data de plantio.</div></div></div>`;
       return;
     }
-    const e = r.estimativa, f = r.faixa, t = r.tradicional;
-    const NM = {vegetativo: "Vegetativo", floracao: "Floração", enchimento: "Enchimento"};
-    const tabMensal = r.fonte_clima === "inmet" ? tabInmet(r) : `<h3>Clima de entrada: média mensal do sensor (todos os registros do mês, dentro do ciclo)</h3>
-      <table><tr><th>Mês</th><th class="n">Registros</th><th class="n">Dias</th><th class="n">Temp. média</th><th class="n">Máx.</th>
-        <th class="n">Mín.</th><th class="n">Umid. média</th><th class="n">Umid. mín.</th><th class="n">VPD médio</th><th class="n">Amplitude diária</th></tr>
-      ${r.mensal.map(m => `<tr><td>${esc(m.mes)}</td><td class="n">${m.leituras}</td><td class="n">${m.dias}</td>
-        <td class="n">${fmt(m.temp_media)} °C</td><td class="n">${fmt(m.temp_max)}</td><td class="n">${fmt(m.temp_min)}</td>
-        <td class="n">${fmt(m.umidade_media)}%</td><td class="n">${fmt(m.umidade_min)}%</td><td class="n">${fmt(m.vpd_medio, 2)} kPa</td>
-        <td class="n">${fmt(m.amplitude_media)} °C</td></tr>`).join("")}</table>
-      <div class="nota">Estádios: ${Object.entries(r.estadios).map(([k, v]) =>
-        `${NM[k]} ${dataBR(v.inicio)} a ${dataBR(v.fim)} — ${v.meses.length ? "meses " + v.meses.join(", ") : "sem registro"}`).join(" · ")}.
-        Modelo usado: ${r.momento}.</div>`;
-    const area = r.unidade === "m2" ? `${fmt(r.area_informada, 0)} m² (${fmt(r.hectares, 4)} ha)` : `${fmt(r.hectares, 2)} ha`;
-    alvo.innerHTML = `<div class="cartao">
-      <h2>${esc(r.cultura)} · ${esc(r.municipio)} / ${esc(r.uf)} · safra ${r.ano_safra} · ${area}</h2>
-      ${seloModo(r)}
-      <div class="sub">${esc(r.clima)}</div>
-      <div class="grade">
-        <div class="kpi"><div class="r">Produtividade estimada</div><div class="v">${fmt(e.sacas_ha)} <span style="font-size:13px">sc/ha</span></div>
-          <div class="d">faixa provável ${fmt(f.p25.sacas_ha)} a ${fmt(f.p75.sacas_ha)} sc/ha</div></div>
-        <div class="kpi ok"><div class="r">Produção na sua área</div><div class="v">${fmt(e.sacas, e.sacas < 100 ? 1 : 0)} <span style="font-size:13px">sacas</span></div>
-          <div class="d">${fmt(e.toneladas, 2)} t · faixa ${fmt(f.p25.sacas, e.sacas < 100 ? 1 : 0)} a ${fmt(f.p75.sacas, e.sacas < 100 ? 1 : 0)} sacas</div></div>
-        <div class="kpi trad"><div class="r">Método tradicional</div><div class="v">${fmt(t.sacas_ha)} <span style="font-size:13px">sc/ha</span></div>
-          <div class="d">${esc(r.origem_tradicional)} · ${fmt(t.sacas, e.sacas < 100 ? 1 : 0)} sacas</div></div>
-        ${r.colheita ? `<div class="kpi"><div class="r">Colheita estimada</div><div class="v">${dataBR(r.colheita)}</div></div>` : ""}
-        ${r.realizado ? `<div class="kpi ok"><div class="r">Realizado nessa safra (IBGE)</div><div class="v">${fmt(r.realizado.sacas_ha)} <span style="font-size:13px">sc/ha</span></div>
-          <div class="d">erro do modelo ${dif(e.sacas_ha - r.realizado.sacas_ha)} · do tradicional ${dif(t.sacas_ha - r.realizado.sacas_ha)} sc/ha
-          ${r.na_base_treino ? "<br><b>safra usada no treino</b>: comparação otimista" : ""}</div></div>` : ""}
-      </div>
-      <table><tr><th>Cenário</th><th class="n">sc/ha</th><th class="n">Sacas na área</th><th class="n">Toneladas</th></tr>
-        ${[["Pessimista (10%)", f.p10], ["Provável baixo (25%)", f.p25], ["Central", e], ["Provável alto (75%)", f.p75], ["Otimista (90%)", f.p90]]
-          .map(([n, v]) => `<tr${n === "Central" ? ' style="font-weight:600"' : ""}><td>${n}</td><td class="n">${fmt(v.sacas_ha)}</td>
-            <td class="n">${fmt(v.sacas, e.sacas < 100 ? 1 : 0)}</td><td class="n">${fmt(v.toneladas, 2)}</td></tr>`).join("")}</table>
-      ${tabMensal}
-      <h3>O que pesa nesta estimativa (sc/ha)</h3>${svgContrib(r.contribuicoes)}
-      <div class="aviso"><b>Leia antes de usar:</b><ul class="motivos">${r.avisos.map(a => `<li>${esc(a)}</li>`).join("")}</ul></div>
-      <div class="nota">1 saca = 60 kg. A estimativa é a produtividade média do município; uma lavoura individual varia mais que a média.</div>
-    </div>`;
+    const plantio = $("#c-plantio").value;
+    alvo.innerHTML = `<article class="res">
+      <div class="res-topo"><h2 class="titulo-res">${tituloRes(r)}</h2>${chipModo(r)}</div>
+      ${heroi(r)}
+      ${comparacao(r)}
+      <section class="bloco ciclo"><h3>Ciclo da lavoura</h3>
+        <p class="ajuda">Do plantio à colheita estimada, dividido nas três fases da planta. O clima de cada fase entra no cálculo;
+          fase sem medição ${r.fonte_clima === "inmet" ? "do INMET" : "do sensor"} fica tracejada.</p>
+        ${svgCiclo(r, plantio)}
+        <div class="estadios">${cardsEstadios(r)}</div>
+      </section>
+      <section class="bloco"><h3>O que mais pesou nesta estimativa</h3>
+        <p class="ajuda">Quanto cada fator somou ou tirou, em sacas por hectare, a partir do ponto de partida do modelo.</p>
+        ${barrasPesos(r.contribuicoes)}
+      </section>
+      <details class="mais"><summary>Cenários de produção</summary><div>${tabCenarios(r)}</div></details>
+      <details class="mais"><summary>${r.fonte_clima === "inmet" ? "Clima semana a semana, por fase (INMET)" : "Clima mês a mês (sensor)"}</summary>
+        <div>${r.fonte_clima === "inmet" ? tabInmet(r) : tabSensor(r)}</div></details>
+      <aside class="adendos"><h3>Antes de usar estes números</h3>
+        <ul>${r.avisos.map(a => `<li>${esc(a.charAt(0).toUpperCase() + a.slice(1))}.</li>`).join("")}
+          <li>1 saca = 60 kg. A estimativa é a produtividade média do município; uma lavoura individual varia mais que a média.</li></ul>
+      </aside>
+    </article>`;
   } catch (err) { alvo.innerHTML = `<div class="cartao erro">Erro: ${esc(err.message)}</div>`; }
 }
 
-/* -------------------------------------------- calculadora: modo e INMET ---- */
+/* -------------------------------------------- calculadora: resultado ---- */
 const dif = v => (v >= 0 ? "+" : "−") + fmt(Math.abs(v));
+const COR_EST = {vegetativo: "var(--veg)", floracao: "var(--flo)", enchimento: "var(--enc)"};
+const NOME_EST_T = {vegetativo: "Vegetativo", floracao: "Floração", enchimento: "Enchimento de grãos"};
+const FAZ_EST = {vegetativo: "a planta cresce: folhas, caule e raízes",
+                 floracao: "floresce e é polinizada; define quantos grãos se formam",
+                 enchimento: "os grãos enchem; define o peso de cada um"};
 
-function seloModo(r) {
-  return r.modo === "passada"
-    ? `<div class="selo ok" style="margin:8px 0"><b>Safra passada</b> (colheita estimada ${dataBR(r.colheita)}, antes de hoje):
-        clima daquele período, das estações do INMET ligadas ao município.</div>`
-    : `<div class="selo" style="margin:8px 0;border-color:var(--modelo)"><b>Safra atual</b> (colheita estimada ${dataBR(r.colheita)}):
-        clima de agora, do sensor.</div>`;
+function tituloRes(r) {
+  return `${esc(r.cultura.replace(" (em grão)", ""))} em ${esc(r.municipio)}/${esc(r.uf)} · safra ${r.ano_safra}`;
+}
+function chipModo(r) {
+  return r.fonte_clima === "inmet"
+    ? `<span class="chip inmet">Safra já colhida · clima do INMET</span>`
+    : `<span class="chip sensor">Safra em curso · clima do sensor</span>`;
+}
+
+function heroi(r) {
+  const e = r.estimativa, f = r.faixa;
+  const area = r.unidade === "m2" ? `${fmt(r.area_informada, 0)} m²` : `${fmt(r.hectares, 2)} ha`;
+  const dec = e.sacas < 100 ? 1 : 0;
+  return `<div class="heroi">
+    <div>
+      <div class="numero-grande">${fmt(e.sacas_ha)}<small>sacas por hectare</small></div>
+      <div class="legenda-num">Produtividade estimada. Em metade dos casos, o resultado real fica entre
+        <b>${fmt(f.p25.sacas_ha)}</b> e <b>${fmt(f.p75.sacas_ha)}</b>.</div>
+      <div class="barra-faixa">${svgFaixa(r)}</div>
+    </div>
+    <div class="prod">
+      <div><div class="r">Produção na sua área (${area})</div>
+        <div class="v">${fmt(e.sacas, dec)}<small>sacas</small></div>
+        <div class="r">${fmt(e.toneladas, 2)} toneladas · entre ${fmt(f.p25.sacas, dec)} e ${fmt(f.p75.sacas, dec)} sacas</div></div>
+      <div><div class="r">Colheita estimada</div><div class="v">${dataBR(r.colheita)}</div></div>
+    </div>
+  </div>`;
+}
+
+function svgFaixa(r) {
+  // Faixa em HTML (não SVG) para o texto não encolher no celular.
+  const f = r.faixa, e = r.estimativa.sacas_ha, t = r.tradicional.sacas_ha;
+  const real = r.realizado ? r.realizado.sacas_ha : null;
+  const vals = [f.p10.sacas_ha, f.p90.sacas_ha, t, e].concat(real != null ? [real] : []);
+  let lo = Math.min(...vals), hi = Math.max(...vals); const pad = (hi - lo) * .06; lo -= pad; hi += pad;
+  const pc = v => (100 * (v - lo) / (hi - lo)).toFixed(2);
+  const rot = (v, txt, cls, linha) => {
+    const p = +pc(v), al = p < 18 ? "inicio" : p > 82 ? "fim" : "meio";
+    return `<span class="mk ${cls}" style="left:${p}%"></span>
+      <span class="mk-rot ${al} l${linha}" style="left:${p}%">${txt}</span>`;
+  };
+  return `<div class="fx-leg">Do pior caso (${fmt(f.p10.sacas_ha)}) ao melhor caso (${fmt(f.p90.sacas_ha)}); o traço vertical é a estimativa.</div>
+  <div class="fx" role="img" aria-label="Faixa provável: de ${fmt(f.p10.sacas_ha)} a ${fmt(f.p90.sacas_ha)} sacas por hectare">
+    <div class="fx-eixo"></div>
+    <div class="fx-largo" style="left:${pc(f.p10.sacas_ha)}%;width:${pc(f.p90.sacas_ha) - pc(f.p10.sacas_ha)}%"></div>
+    <div class="fx-meio" style="left:${pc(f.p25.sacas_ha)}%;width:${pc(f.p75.sacas_ha) - pc(f.p25.sacas_ha)}%"></div>
+    <div class="fx-central" style="left:${pc(e)}%" title="estimativa ${fmt(e)}"></div>
+    ${rot(t, `método tradicional ${fmt(t)}`, "trad", 1)}
+    ${real != null ? rot(real, `colhido de fato ${fmt(real)}`, "real", 2) : ""}
+  </div>`;
+}
+
+function comparacao(r) {
+  const e = r.estimativa.sacas_ha, t = r.tradicional.sacas_ha;
+  let txt = `O método tradicional, a ${esc(r.origem_tradicional)}, daria <b>${fmt(t)} sc/ha</b>
+    (${dif(t - e)} em relação ao modelo).`;
+  if (r.realizado) {
+    const real = r.realizado.sacas_ha;
+    txt += ` O IBGE registrou <b>${fmt(real)} sc/ha</b> colhidos nessa safra: o modelo errou por ${dif(e - real)}
+      e o método tradicional por ${dif(t - real)} sc/ha.`;
+    if (r.na_base_treino) txt += ` Esta safra fez parte do treino do modelo, então a comparação é otimista.`;
+  } else if (r.fonte_clima === "sensor") {
+    txt += ` Para prever uma safra ainda não colhida, o método tradicional costuma acertar mais que o modelo.`;
+  }
+  return `<div class="compara">${txt}</div>`;
+}
+
+function svgCiclo(r, plantio) {
+  // Linha do tempo em HTML: as fases ocupam a largura proporcional aos dias.
+  const ini = new Date(plantio + "T00:00"), fimD = new Date(r.colheita + "T00:00");
+  const dias = d => (d - ini) / 864e5;
+  let seg = "";
+  for (const [k, v] of Object.entries(r.estadios)) {
+    if (!v.inicio) continue;
+    const n = dias(new Date(v.fim + "T00:00")) - dias(new Date(v.inicio + "T00:00")) + 1;
+    seg += `<div class="fase${v.valores ? "" : " sem-dado"}" style="flex:${n};--c:${COR_EST[k]}">
+      <span>${NOME_EST_T[k].replace(" de grãos", "")}</span></div>`;
+  }
+  const hoje = new Date(r.hoje + "T00:00");
+  const marca = hoje > ini && hoje < fimD
+    ? `<div class="hoje" style="left:${(100 * (hoje - ini) / (fimD - ini)).toFixed(2)}%"><span>hoje</span></div>` : "";
+  return `<div class="tl"><div class="fases">${seg}</div>${marca}</div>
+    <div class="tl-pontas"><span>plantio ${dataBR(plantio)}</span><span>colheita ${dataBR(r.colheita)}</span></div>`;
+}
+
+function cardsEstadios(r) {
+  const inm = r.fonte_clima === "inmet";
+  const linhas = inm
+    ? [["temp_media", "Temperatura média", 1, " °C"], ["temp_max_abs", "Máxima", 1, " °C"],
+       ["precipitacao_total_mm", "Chuva", 0, " mm"], ["umidade_media", "Umidade média", 0, "%"],
+       ["vpd_medio_kpa", "Secura do ar", 2, " kPa"]]
+    : [["temp_media", "Temperatura média", 1, " °C"], ["temp_max_abs", "Máxima", 1, " °C"],
+       ["temp_min_abs", "Mínima", 1, " °C"], ["umidade_media", "Umidade média", 0, "%"],
+       ["vpd_medio_kpa", "Secura do ar", 2, " kPa"]];
+  return Object.entries(r.estadios).map(([k, v]) => {
+    const quando = v.inicio ? `${dataBR(v.inicio)} a ${dataBR(v.fim)}` : "";
+    const corpo = v.valores
+      ? `<dl>${linhas.map(([c, rot, cas, un]) => v.valores[c] == null ? "" :
+          `<dt>${rot}</dt><dd>${fmt(v.valores[c], cas)}${un}</dd>`).join("")}</dl>
+         <div class="quando" style="margin:8px 0 0">${inm ? `${v.semanas_validas} de ${v.semanas} semanas medidas`
+           : `${v.dias_com_leitura} de ${v.dias_do_estadio} dias com leitura`}</div>`
+      : `<div class="sem">${inm ? "Sem medição do INMET nesta fase." : "O sensor ainda não mediu esta fase."}</div>`;
+    return `<div class="est${v.valores ? "" : " vazio"}" style="--c:${COR_EST[k]}">
+      <h4>${NOME_EST_T[k]}</h4><div class="quando">${quando} · ${FAZ_EST[k]}</div>${corpo}</div>`;
+  }).join("");
+}
+
+function barrasPesos(lista) {
+  const m = Math.max(...lista.map(c => Math.abs(c.contribuicao))) || 1;
+  return `<div class="pesos"><div></div><div class="pesos-leg"><span>tira sacas</span><span>soma sacas</span></div><div></div>` + lista.map(c => {
+    const v = c.contribuicao, w = 50 * Math.abs(v) / m;
+    return `<div class="nome">${esc(rotuloVar(c.variavel))}</div>
+      <div class="trilho"><div class="b ${v >= 0 ? "mais" : "menos"}" style="width:${w}%"></div></div>
+      <div class="val">${v >= 0 ? "+" : "−"}${fmt(Math.abs(v), 1)}</div>`;
+  }).join("") + `</div>`;
+}
+
+function tabCenarios(r) {
+  const e = r.estimativa, f = r.faixa, dec = e.sacas < 100 ? 1 : 0;
+  return `<table><tr><th>Cenário</th><th class="n">sc/ha</th><th class="n">Sacas na área</th><th class="n">Toneladas</th></tr>
+    ${[["Pessimista (1 em 10 fica abaixo)", f.p10], ["Provável baixo", f.p25], ["Central", e], ["Provável alto", f.p75],
+       ["Otimista (1 em 10 fica acima)", f.p90]]
+      .map(([n, v]) => `<tr${n === "Central" ? ' style="font-weight:700"' : ""}><td>${n}</td><td class="n">${fmt(v.sacas_ha)}</td>
+        <td class="n">${fmt(v.sacas, dec)}</td><td class="n">${fmt(v.toneladas, 2)}</td></tr>`).join("")}</table>
+    <div class="nota">A faixa vem dos erros reais do modelo em municípios que ele não viu no treino. Modelo usado: ${r.momento}.</div>`;
+}
+
+function tabSensor(r) {
+  return `<table><tr><th>Mês</th><th class="n">Leituras</th><th class="n">Dias</th><th class="n">Temp. média</th><th class="n">Máx.</th>
+      <th class="n">Mín.</th><th class="n">Umid. média</th><th class="n">Umid. mín.</th><th class="n">Secura do ar</th><th class="n">Amplitude diária</th></tr>
+    ${r.mensal.map(m => `<tr><td>${esc(m.mes)}</td><td class="n">${m.leituras}</td><td class="n">${m.dias}</td>
+      <td class="n">${fmt(m.temp_media)} °C</td><td class="n">${fmt(m.temp_max)}</td><td class="n">${fmt(m.temp_min)}</td>
+      <td class="n">${fmt(m.umidade_media)}%</td><td class="n">${fmt(m.umidade_min)}%</td><td class="n">${fmt(m.vpd_medio, 2)} kPa</td>
+      <td class="n">${fmt(m.amplitude_media)} °C</td></tr>`).join("")}</table>
+    <div class="nota">Média de todas as leituras de cada mês dentro do ciclo. Fases: ${Object.entries(r.estadios).map(([k, v]) =>
+      `${NOME_EST_T[k]} ${v.meses.length ? "(" + v.meses.join(", ") + ")" : "(sem leitura)"}`).join(" · ")}.</div>`;
 }
 
 function tabInmet(r) {
-  const inm = r.inmet, NM = {vegetativo: "Vegetativo", floracao: "Floração", enchimento: "Enchimento"};
+  const inm = r.inmet;
   const V = [["temp_media", "Temp. média (°C)", 1], ["temp_max_abs", "Temp. máx. (°C)", 1], ["temp_min_abs", "Temp. mín. (°C)", 1],
     ["precipitacao_total_mm", "Chuva (mm)", 0], ["dias_com_chuva", "Dias com chuva", 0], ["maior_veranico", "Maior veranico (dias)", 0],
-    ["graus_dia_acum", "Graus-dia (°C·dia)", 0], ["radiacao_total_mjm2", "Radiação (MJ/m²)", 0],
-    ["umidade_media", "Umid. média (%)", 1], ["vpd_medio_kpa", "VPD médio (kPa)", 2], ["vento_medio", "Vento médio (m/s)", 1]];
+    ["graus_dia_acum", "Graus-dia", 0], ["radiacao_total_mjm2", "Radiação (MJ/m²)", 0],
+    ["umidade_media", "Umid. média (%)", 1], ["vpd_medio_kpa", "Secura do ar (kPa)", 2], ["vento_medio", "Vento médio (m/s)", 1]];
   const est = Object.entries(r.estadios);
-  return `<h3>Clima de entrada: INMET, semana a semana, agregado por estádio (regras do treino)</h3>
-    <table><tr><th></th>${est.map(([k]) => `<th class="n">${NM[k]}</th>`).join("")}</tr>
-      <tr><td>Período</td>${est.map(([, v]) => `<td class="n">${dataBR(v.inicio)} a ${dataBR(v.fim)}</td>`).join("")}</tr>
-      <tr><td>Semanas com dado</td>${est.map(([, v]) => `<td class="n">${v.semanas_validas} de ${v.semanas}</td>`).join("")}</tr>
+  return `<table><tr><th></th>${est.map(([k]) => `<th class="n">${NOME_EST_T[k]}</th>`).join("")}</tr>
+      <tr><td>Semanas medidas</td>${est.map(([, v]) => `<td class="n">${v.semanas_validas} de ${v.semanas}</td>`).join("")}</tr>
       ${V.map(([c, rot, cas]) => `<tr><td>${rot}</td>${est.map(([, v]) =>
         `<td class="n">${v.valores && v.valores[c] != null ? fmt(v.valores[c], cas) : "—"}</td>`).join("")}</tr>`).join("")}</table>
-    <div class="nota">Estações: ${esc(inm.estacoes.join(", ") || "—")} (dados no banco de ${dataBR(inm.dados_de)} a ${dataBR(inm.dados_ate)}).
-      Cobertura do ciclo: ${inm.semanas_validas} de ${inm.semanas_esperadas} semanas (${fmt(100 * inm.cobertura_ciclo, 0)}%).
-      Modelo usado: ${r.momento}.</div>`;
+    <div class="nota">Estações: ${esc(inm.estacoes.join(", ") || "—")} (dados de ${dataBR(inm.dados_de)} a ${dataBR(inm.dados_ate)}).
+      ${inm.semanas_validas} de ${inm.semanas_esperadas} semanas do ciclo medidas. Modelo usado: ${r.momento}.</div>`;
 }
 
 /* ---------------------------------------------------- sensor (IoT) ---- */
