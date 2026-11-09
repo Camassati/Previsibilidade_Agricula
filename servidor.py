@@ -10,7 +10,7 @@ JSON para previsao.html, que ele mesmo serve.
 
 De onde vem cada coisa:
     banco tcc2026   BASE_MODELO, PRODUTIVIDADE_OBSERVADA, CONFIGURACAO_SAFRA,
-                    CULTURA, REGIAO, TIPO_SOLO, PONTE_ESTACAO_MUNICIPIO,
+                    CULTURA, REGIAO, PONTE_ESTACAO_MUNICIPIO,
                     CLIMA_SEMANAL, LEITURA_IOT (só leitura; aba "Sensor ao vivo"
                     e clima da Calculadora)
     arquivos        modelo_export.json  (coeficientes, escalas, resíduos)
@@ -598,11 +598,10 @@ def semana_na_janela(semana, ini, fim):
 def api_configuracoes(_q):
     cfg = ler_sql("""
         SELECT c.id_config, c.data_plantio, c.id_regiao, r.uf, r.cidade, r.cod_estacao,
-               cu.nome_cultura, cu.ciclo_estimado_dias, t.nome_solo
+               cu.nome_cultura, cu.ciclo_estimado_dias
           FROM CONFIGURACAO_SAFRA c
           JOIN REGIAO r      ON r.id_regiao  = c.id_regiao
           JOIN CULTURA cu    ON cu.id_cultura = c.id_cultura
-          LEFT JOIN TIPO_SOLO t ON t.id_solo = c.id_solo
          ORDER BY c.id_config""")
     ponte = ler_sql("SELECT id_regiao, cod_municipio_ibge, municipio_ibge FROM PONTE_ESTACAO_MUNICIPIO")
     clima = ler_sql("""SELECT id_regiao, MAX(periodo) AS ultimo_periodo, MAX(data_fim) AS clima_ate
@@ -706,7 +705,7 @@ def api_configuracoes(_q):
         saida.append({
             "id_config": int(r.id_config), "uf": r.uf, "estacao": r.cidade,
             "cod_estacao": r.cod_estacao, "cultura": r.nome_cultura, "cultura_pam": cultura_tcc,
-            "solo": r.nome_solo, "data_plantio": str(plantio) if plantio else None,
+            "data_plantio": str(plantio) if plantio else None,
             "ciclo_dias": ciclo, "colheita_estimada": str(colheita) if colheita else None,
             "semana_plantio": semana, "janela": janela,
             "municipios": [{"cod": int(a), "nome": b} for a, b in
@@ -742,47 +741,6 @@ def api_desempenho(_q):
 
 # ======================================================= calculadora ========
 KG_SACA = 60   # 1 saca = 60 kg, como em todo o pipeline
-ARQ_AJUSTE = "ajuste_solo_cultura.csv"
-# Critérios de terreno que o ZARC não indica para soja, milho e trigo
-# (portarias SPA/MAPA, ex. nº 370/2023 e nº 385/2022): independem da classe.
-ZARC_TERRENO = {
-    "raso": "solo de profundidade inferior a 50 cm",
-    "pedregoso": "solo muito pedregoso (calhaus e matacões em mais de 15% da massa ou da superfície)",
-}
-
-
-def ajustes_solo():
-    """Tabela de ajuste agronômico por solo x cultura. FICA FORA DO MODELO:
-    é aplicada depois da previsão. Lida do CSV a cada chamada, para o grupo
-    poder editar sem reiniciar o servidor."""
-    pasta = os.path.dirname(os.path.abspath(__file__))
-    caminho = os.path.join(pasta, ARQ_AJUSTE)
-    if not os.path.exists(caminho):
-        return {}
-    t = pd.read_csv(caminho, sep=";", dtype=str, encoding="utf-8-sig").fillna("")
-    out = {}
-    for r in t.itertuples():
-        out[(int(r.id_solo), r.cultura_tcc)] = {
-            "situacao": r.situacao.strip() or "apto",
-            "ajuste_pct": float(r.ajuste_pct.replace(",", ".") or 0),
-            "motivo": r.motivo.strip(), "fonte": r.fonte.strip()}
-    return out
-
-
-def api_solos(_q):
-    t = ler_sql("""SELECT id_solo, nome_solo, ordem_solo, textura, retencao_agua, drenagem,
-                          aptidao_graos, profundidade, risco_erosao, descricao
-                     FROM TIPO_SOLO ORDER BY id_solo""")
-    aj = ajustes_solo()
-    sol = t.to_dict(orient="records")
-    for s_ in sol:
-        s_["por_cultura"] = {c: aj.get((int(s_["id_solo"]), c), {
-                                 "situacao": "sem_regra", "ajuste_pct": 0.0,
-                                 "motivo": f"sem linha em {ARQ_AJUSTE}", "fonte": ""})
-                             for c in FAIXAS_SACAS}
-    return {"solos": sol, "zarc_terreno": ZARC_TERRENO, "arquivo_ajuste": ARQ_AJUSTE}
-
-
 def api_calcular(q):
     """Formulário do produtor -> produtividade estimada e produção da área.
 
@@ -795,7 +753,8 @@ def api_calcular(q):
         (LEITURA_IOT), média mensal de todos os registros (decisão de 26/10);
         modelo do último estádio com leitura; o que o sensor não mede entra com
         a mediana do treino.
-    O solo NÃO entra no modelo: é ajuste por regra depois da previsão."""
+    Sem tipo de solo (decisão do autor, 08/11): o modelo não usa solo e a
+    página não pede nem ajusta por solo."""
     exigir_base()
     cod, cult = int(q["m"][0]), q["c"][0]
     unidade = q.get("unidade", ["ha"])[0]
@@ -805,19 +764,6 @@ def api_calcular(q):
     if not q.get("plantio", [""])[0]:
         raise RuntimeError("informe a data de plantio: é ela que diz se a safra já passou "
                            "e em que estádio cai cada período de clima")
-    # Solo é obrigatório (decisão do autor, 26/10), e cada solo x cultura
-    # precisa ter a sua linha na tabela de ajuste — sem regra, não calcula.
-    if not q.get("solo", [""])[0]:
-        raise RuntimeError("informe o tipo de solo: ele é obrigatório")
-    id_solo = int(q["solo"][0])
-    t_solo = ler_sql("SELECT * FROM TIPO_SOLO WHERE id_solo = %s", (id_solo,))
-    if not len(t_solo):
-        raise RuntimeError(f"tipo de solo {id_solo} não existe na tabela TIPO_SOLO")
-    solo = t_solo.iloc[0].to_dict()
-    regra = ajustes_solo().get((id_solo, cult))
-    if regra is None:
-        raise RuntimeError(f"o solo {id_solo} não tem regra para {cult} em {ARQ_AJUSTE}; "
-                           "cadastre a linha (situacao, ajuste_pct, motivo, fonte) e calcule de novo")
     ha = area / 10000 if unidade == "m2" else area
     b = EST["base"]
     sub = b[(b.cod_municipio == cod) & (b.cultura_tcc == cult)]
@@ -931,35 +877,13 @@ def api_calcular(q):
                                                           "fora_do_ciclo", "configs")}}
     linha["base_hist"] = hist
 
-    # ---- solo e terreno: bloqueio (ZARC) antes de qualquer conta
-    terreno = [ZARC_TERRENO[k] for k in ZARC_TERRENO if q.get(k, ["0"])[0] in ("1", "true", "on")]
-    if regra["situacao"] == "nao_indicado" or terreno:
-        motivos = ([regra["motivo"]] if regra["situacao"] == "nao_indicado" else []) + \
-                  [f"o ZARC não indica áreas com {t}" for t in terreno]
-        fontes = []
-        if regra["situacao"] == "nao_indicado" and regra["fonte"]:
-            fontes.append(regra["fonte"])
-        if terreno:
-            fontes.append("Portarias ZARC (SPA/MAPA), seção Tipos de Solos Aptos ao Cultivo")
-        return {**base, "bloqueado": True, "motivos": motivos, "fonte": " · ".join(fontes) or "—"}
-
     total, contrib, imput, aus = prever(linha, mom)
     fx = faixa(total, mom, cult)
-    pct = regra["ajuste_pct"]
-    fator = 1 + pct / 100
 
     def producao(sc):
         return {"sacas_ha": sc, "sacas": sc * ha, "kg": sc * ha * KG_SACA,
                 "toneladas": sc * ha * KG_SACA / 1000}
 
-    avisos.insert(0, "o modelo foi treinado só com clima e histórico do município, sem solo; "
-                     "o ajuste de solo é uma regra aplicada DEPOIS da previsão, definida na "
-                     f"tabela {ARQ_AJUSTE}")
-    if regra["situacao"] in ("aviso", "apto") and regra["motivo"]:
-        avisos.insert(1, f"solo: {regra['motivo']}")
-    if pct and not regra.get("fonte"):
-        avisos.insert(1, f"o ajuste de {pct:+.0f}% para este solo NÃO TEM FONTE na tabela; "
-                         "é um parâmetro a validar antes de usar no TCC")
     if imput:
         quem = "pelo INMET neste ciclo" if passada else "pelo sensor"
         avisos.append(f"{len(imput)} variável(is) com peso no modelo não foram medidas {quem} "
@@ -972,14 +896,11 @@ def api_calcular(q):
                       "não viu); para prever a PRÓXIMA safra o modelo perde para a média histórica")
     return {**base, **extra, "clima": clima,
             "area_informada": area, "unidade": unidade, "hectares": ha,
-            "estimativa_modelo": producao(total),
-            "estimativa": producao(total * fator),
-            "faixa": {k: producao(v * fator) for k, v in fx.items()},
-            "ajuste_solo": {"pct": pct, "fonte": regra.get("fonte", ""),
-                            "situacao": regra.get("situacao", "apto")},
+            "estimativa": producao(total),
+            "faixa": {k: producao(v) for k, v in fx.items()},
             "tradicional": producao(hist), "origem_tradicional": origem_hist,
             "realizado": producao(realizado) if realizado is not None else None,
-            "contribuicoes": contrib[:8], "solo": solo, "avisos": avisos, "momento": mom}
+            "contribuicoes": contrib[:8], "avisos": avisos, "momento": mom}
 
 
 # ===================================================== sensor ao vivo =======
@@ -1075,7 +996,7 @@ def api_sensor_ao_vivo(q):
 
 ROTAS = {"/api/estado": api_estado, "/api/opcoes": api_opcoes,
          "/api/sensor": api_sensor_ao_vivo,
-         "/api/solos": api_solos, "/api/calcular": api_calcular,
+         "/api/calcular": api_calcular,
          "/api/previsao": api_previsao, "/api/configuracoes": api_configuracoes,
          "/api/desempenho": api_desempenho}
 

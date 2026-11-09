@@ -101,20 +101,17 @@ code{font-size:12.5px}
   <section id="aba-calc" class="aba ativa">
     <div class="cartao">
       <h2>Quanto vou colher?</h2>
-      <div class="sub">Escolha o grão, o município, o solo, a área e a data de plantio. O clima depende da data:
+      <div class="sub">Escolha o grão, o município, a área e a data de plantio. O clima depende da data:
         <b>safra que já passou</b> (colheita antes de hoje) usa o clima daquele período, medido pelas estações do INMET
         do município; <b>safra atual</b> usa o clima de agora, do sensor (LEITURA_IOT), em média mensal.</div>
       <div class="form" style="margin-top:12px">
         <label>Grão<select id="c-cult"></select></label>
         <label>Município<select id="c-mun"></select></label>
-        <label>Tipo de solo<select id="c-solo" required><option value="" disabled selected>— escolha o solo —</option></select></label>
         <label>Área<input id="c-area" type="number" min="0" step="any" value="10000"
           style="font:inherit;padding:7px 9px;border:1px solid var(--linha);border-radius:8px;width:130px;background:var(--cartao);color:var(--tinta)"></label>
         <label>Unidade<select id="c-un"><option value="m2">m²</option><option value="ha">hectares</option></select></label>
         <label>Plantio<input id="c-plantio" type="date" value="2026-09-21"
           style="font:inherit;padding:6px 9px;border:1px solid var(--linha);border-radius:8px;background:var(--cartao);color:var(--tinta)"></label>
-        <label style="flex-direction:row;align-items:center;gap:6px;color:var(--sec)"><input type="checkbox" id="c-raso"> solo raso (&lt; 50 cm)</label>
-        <label style="flex-direction:row;align-items:center;gap:6px;color:var(--sec)"><input type="checkbox" id="c-pedregoso"> muito pedregoso (&gt; 15% de pedras)</label>
         <button id="c-btn" style="font:inherit;padding:8px 18px;border:0;border-radius:8px;background:var(--modelo);color:#fff;cursor:pointer;font-weight:600">Calcular</button>
       </div>
     </div>
@@ -292,47 +289,19 @@ function prepararCalculadora() {
     trocaMun();
   };
   const trocaMun = () => {};
-  sc.onchange = () => { trocaCult(); montarSolos(); }; $("#c-mun").onchange = trocaMun;
+  sc.onchange = trocaCult; $("#c-mun").onchange = trocaMun;
   $("#c-btn").onclick = calcularProdutor;
   trocaCult();
-  api("/api/solos").then(r => { SOLOS = r.solos; montarSolos(); }).catch(() => {});
-}
-
-let SOLOS = [];
-function montarSolos() {
-  const cult = $("#c-cult").value, atual = $("#c-solo").value;
-  $("#c-solo").innerHTML = `<option value="" disabled>— escolha o solo —</option>` + SOLOS.map(s => {
-    const r = (s.por_cultura || {})[cult] || {situacao: "sem_regra", ajuste_pct: 0};
-    const bloq = r.situacao === "nao_indicado" || r.situacao === "sem_regra";
-    const extra = r.situacao === "sem_regra" ? " — sem regra cadastrada" : r.situacao === "nao_indicado" ? " — não indicado (ZARC)" : (r.ajuste_pct ? ` — ajuste ${r.ajuste_pct > 0 ? "+" : ""}${fmt(r.ajuste_pct, 0)}%` : (r.situacao === "aviso" ? " — atenção" : ""));
-    return `<option value="${s.id_solo}" ${bloq ? "disabled" : ""}>${esc(s.nome_solo)}${extra}</option>`;
-  }).join("");
-  const op = [...$("#c-solo").options].find(o => o.value === atual && !o.disabled);
-  $("#c-solo").value = op ? atual : "";
 }
 
 async function calcularProdutor() {
-  if (!$("#c-solo").value) {
-    $("#calc").innerHTML = `<div class="cartao"><div class="selo ruim"><b>Escolha o tipo de solo.</b>
-      Ele é obrigatório: cada solo tem a sua regra para cada grão (ajuste ou bloqueio).</div></div>`;
-    $("#c-solo").focus();
-    return;
-  }
   const cult = $("#c-cult").value, m = OPC[cult][+$("#c-mun").value];
   const ps = new URLSearchParams({m: m.cod, c: cult, area: $("#c-area").value, unidade: $("#c-un").value,
-    solo: $("#c-solo").value, plantio: $("#c-plantio").value,
-    raso: $("#c-raso").checked ? 1 : 0, pedregoso: $("#c-pedregoso").checked ? 1 : 0});
+    plantio: $("#c-plantio").value});
   const alvo = $("#calc");
   alvo.innerHTML = `<div class="cartao">Calculando…</div>`;
   try {
     const r = await api("/api/calcular?" + ps);
-    if (r.bloqueado) {
-      alvo.innerHTML = `<div class="cartao"><h2>${esc(r.cultura)} · ${esc(r.municipio)} / ${esc(r.uf)}</h2>
-        <div class="selo ruim"><b>Cultivo não indicado neste terreno — a estimativa não é calculada.</b>
-          <ul class="motivos">${r.motivos.map(m => `<li>${esc(m)}</li>`).join("")}</ul>
-          <div class="nota">Fonte: ${esc(r.fonte)}</div></div></div>`;
-      return;
-    }
     if (r.sem_dados) {
       const det = r.fonte_clima === "inmet"
         ? `<b>Sem clima do INMET para este ciclo:</b> ${esc(r.motivo)}.
@@ -344,7 +313,7 @@ async function calcularProdutor() {
         ${seloModo(r)}<div class="selo ruim">${det}</div></div>`;
       return;
     }
-    const e = r.estimativa, f = r.faixa, t = r.tradicional, aj = r.ajuste_solo, em = r.estimativa_modelo;
+    const e = r.estimativa, f = r.faixa, t = r.tradicional;
     const NM = {vegetativo: "Vegetativo", floracao: "Floração", enchimento: "Enchimento"};
     const tabMensal = r.fonte_clima === "inmet" ? tabInmet(r) : `<h3>Clima de entrada: média mensal do sensor (todos os registros do mês, dentro do ciclo)</h3>
       <table><tr><th>Mês</th><th class="n">Registros</th><th class="n">Dias</th><th class="n">Temp. média</th><th class="n">Máx.</th>
@@ -357,16 +326,13 @@ async function calcularProdutor() {
         `${NM[k]} ${dataBR(v.inicio)} a ${dataBR(v.fim)} — ${v.meses.length ? "meses " + v.meses.join(", ") : "sem registro"}`).join(" · ")}.
         Modelo usado: ${r.momento}.</div>`;
     const area = r.unidade === "m2" ? `${fmt(r.area_informada, 0)} m² (${fmt(r.hectares, 4)} ha)` : `${fmt(r.hectares, 2)} ha`;
-    const s = r.solo;
     alvo.innerHTML = `<div class="cartao">
       <h2>${esc(r.cultura)} · ${esc(r.municipio)} / ${esc(r.uf)} · safra ${r.ano_safra} · ${area}</h2>
       ${seloModo(r)}
       <div class="sub">${esc(r.clima)}</div>
       <div class="grade">
-        <div class="kpi"><div class="r">Produtividade estimada${aj.pct ? " (com ajuste de solo)" : ""}</div><div class="v">${fmt(e.sacas_ha)} <span style="font-size:13px">sc/ha</span></div>
+        <div class="kpi"><div class="r">Produtividade estimada</div><div class="v">${fmt(e.sacas_ha)} <span style="font-size:13px">sc/ha</span></div>
           <div class="d">faixa provável ${fmt(f.p25.sacas_ha)} a ${fmt(f.p75.sacas_ha)} sc/ha</div></div>
-        ${aj.pct ? `<div class="kpi al"><div class="r">Modelo, sem ajuste de solo</div><div class="v">${fmt(em.sacas_ha)} <span style="font-size:13px">sc/ha</span></div>
-          <div class="d">ajuste de solo ${aj.pct > 0 ? "+" : ""}${fmt(aj.pct, 0)}% · ${aj.fonte ? "fonte: " + esc(aj.fonte) : "<b>sem fonte</b>"}</div></div>` : ""}
         <div class="kpi ok"><div class="r">Produção na sua área</div><div class="v">${fmt(e.sacas, e.sacas < 100 ? 1 : 0)} <span style="font-size:13px">sacas</span></div>
           <div class="d">${fmt(e.toneladas, 2)} t · faixa ${fmt(f.p25.sacas, e.sacas < 100 ? 1 : 0)} a ${fmt(f.p75.sacas, e.sacas < 100 ? 1 : 0)} sacas</div></div>
         <div class="kpi trad"><div class="r">Método tradicional</div><div class="v">${fmt(t.sacas_ha)} <span style="font-size:13px">sc/ha</span></div>
@@ -374,18 +340,13 @@ async function calcularProdutor() {
         ${r.colheita ? `<div class="kpi"><div class="r">Colheita estimada</div><div class="v">${dataBR(r.colheita)}</div>
           <div class="d">plantio + ${r.ciclo_dias} dias (regra de calendário)</div></div>` : ""}
         ${r.realizado ? `<div class="kpi ok"><div class="r">Realizado nessa safra (IBGE)</div><div class="v">${fmt(r.realizado.sacas_ha)} <span style="font-size:13px">sc/ha</span></div>
-          <div class="d">erro do modelo ${dif(em.sacas_ha - r.realizado.sacas_ha)} · do tradicional ${dif(t.sacas_ha - r.realizado.sacas_ha)} sc/ha
+          <div class="d">erro do modelo ${dif(e.sacas_ha - r.realizado.sacas_ha)} · do tradicional ${dif(t.sacas_ha - r.realizado.sacas_ha)} sc/ha
           ${r.na_base_treino ? "<br><b>safra usada no treino</b>: comparação otimista" : ""}</div></div>` : ""}
       </div>
       <table><tr><th>Cenário</th><th class="n">sc/ha</th><th class="n">Sacas na área</th><th class="n">Toneladas</th></tr>
         ${[["Pessimista (10%)", f.p10], ["Provável baixo (25%)", f.p25], ["Central", e], ["Provável alto (75%)", f.p75], ["Otimista (90%)", f.p90]]
           .map(([n, v]) => `<tr${n === "Central" ? ' style="font-weight:600"' : ""}><td>${n}</td><td class="n">${fmt(v.sacas_ha)}</td>
             <td class="n">${fmt(v.sacas, e.sacas < 100 ? 1 : 0)}</td><td class="n">${fmt(v.toneladas, 2)}</td></tr>`).join("")}</table>
-      ${s ? `<h3>Solo informado: ${esc(s.nome_solo)}</h3><div class="nota" style="margin-top:0">${esc(s.descricao || "")}
-        Retenção de água ${s.retencao_agua}/5 · drenagem ${s.drenagem}/5 · aptidão para grãos ${s.aptidao_graos}/5 ·
-        profundidade ${s.profundidade}/5 · risco de erosão ${s.risco_erosao}/5.
-        ${aj.pct ? `<b>Ajuste aplicado depois do modelo: ${aj.pct > 0 ? "+" : ""}${fmt(aj.pct, 0)}%.</b>` : "<b>Sem ajuste para este solo nesta cultura</b> (o modelo não usa solo)."}
-        Atributos 1–5 da tabela TIPO_SOLO, sem fonte cadastrada.</div>` : ""}
       ${tabMensal}
       <h3>O que pesa nesta estimativa (sc/ha)</h3>${svgContrib(r.contribuicoes)}
       <div class="aviso"><b>Leia antes de usar:</b><ul class="motivos">${r.avisos.map(a => `<li>${esc(a)}</li>`).join("")}</ul></div>
@@ -488,7 +449,7 @@ async function carregarConfigs() {
         `<h3>Rendimento do IBGE · ${esc(hs[0].municipio)} · ${esc(c.cultura_pam)}</h3>${svgHistorico(hs, null)}`).join("");
       return `<div class="cartao">
         <h2>${esc(c.cultura)} em ${muns} / ${esc(c.uf)} <span class="tag">configuração ${c.id_config}</span></h2>
-        <div class="sub">Estação ${esc(c.estacao)} (${esc(c.cod_estacao)}) · solo cadastrado: ${esc(c.solo || "—")}</div>
+        <div class="sub">Estação ${esc(c.estacao)} (${esc(c.cod_estacao)})</div>
         <div class="grade">
           <div class="kpi"><div class="r">Plantio</div><div class="v">${dataBR(c.data_plantio)}</div><div class="d">semana ISO ${c.semana_plantio ?? "—"}</div></div>
           <div class="kpi ok"><div class="r">Colheita estimada</div><div class="v">${dataBR(c.colheita_estimada)}</div>
@@ -666,7 +627,6 @@ async function consultarSensor(reiniciar) {
 
 function desenharSensor(d) {
   const rot = {ao_vivo: "Ao vivo", atrasado: "Atrasado", parado: "Parado", sem_leituras: "Sem leituras"}[d.situacao];
-  const loc = d.local ? ` · configuração ${d.local.config}: ${esc(d.local.cultura)} em ${esc(d.local.cidade)}/${esc(d.local.uf)}` : "";
   let frase;
   if (d.situacao === "sem_leituras") frase = "A tabela LEITURA_IOT está vazia.";
   else if (d.situacao === "ao_vivo") frase = `Última leitura há ${fmtIdade(d.idade_s)} (${dataHoraBR(d.ultima)}).`;
@@ -674,9 +634,7 @@ function desenharSensor(d) {
     Os gráficos mostram a última janela registrada; quando ele voltar a gravar, a tela atualiza sozinha.`;
   $("#s-status").innerHTML = `<span class="pilula ${d.situacao}">${rot}</span>
     <span style="margin-left:10px;font-size:13.5px">${frase}</span>
-    <div class="nota" style="margin-top:6px">${d.total.toLocaleString("pt-BR")} leituras no banco${loc}.
-      ${SV.pausado ? "<b>Pausado.</b>" : `Próxima consulta em ${INTERVALO_MS / 1000} s.`}
-      Idade medida pelo relógio do MySQL (${dataHoraBR(d.agora_banco)}).</div>`;
+`;
   if (!SV.leituras.length) { $("#sensor").innerHTML = ""; return; }
 
   const u = SV.leituras[SV.leituras.length - 1];
@@ -695,7 +653,7 @@ function desenharSensor(d) {
               `${fmt(dia.temp_min)}–${fmt(dia.temp_max)} °C · ${fmt(dia.umid_min)}–${fmt(dia.umid_max)}%`, "trad") : ""}
       </div>
       <div class="nota">Janela: ${nJan.toLocaleString("pt-BR")} leituras de ${hhmmss(SV.leituras[0].hora)} a ${hhmmss(u.hora)},
-        contadas para trás a partir da última leitura. Quebras na linha indicam falha de coleta (buraco bem maior que o ritmo normal da janela).</div>
+        contadas para trás a partir da última leitura. Intervalos maiores que ${FALHA_GAP_S} s aparecem como quebra na linha (falha de coleta).</div>
     </div>
     <div class="duas">
       <div class="cartao"><h2>Temperatura</h2><div class="sub">°C</div><div class="graf" id="g-temp"></div></div>
@@ -723,15 +681,9 @@ function graficoLinha(alvo, dados, campo, un, casas) {
   const folga = Math.max((hi - lo) * 0.15, 0.5); lo -= folga; hi += folga;
   const x = t => mE + (t - t0) / (t1 - t0) * (W - mE - mD);
   const y = v => mT + (hi - v) / (hi - lo) * (H - mT - mB);
-  // limite de quebra adaptado à cadência real das leituras: uma falha é um buraco
-  // bem maior que o ritmo normal da janela. Assim a linha não se parte quando as
-  // leituras chegam de minuto em minuto (e não de 5 em 5 s).
-  const gapsS = pts.slice(1).map((p, i) => (p.t - pts[i].t) / 1000).sort((a, b) => a - b);
-  const cadencia = gapsS.length ? gapsS[Math.floor(gapsS.length / 2)] : FALHA_GAP_S;
-  const limiteQuebra = Math.max(FALHA_GAP_S, cadencia * 2.5);
   let caminho = "";
   pts.forEach((p, i) => {
-    const quebra = i === 0 || (p.t - pts[i - 1].t) / 1000 > limiteQuebra;
+    const quebra = i === 0 || (p.t - pts[i - 1].t) / 1000 > FALHA_GAP_S;
     caminho += `${quebra ? "M" : "L"}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`;
   });
   const passoY = (() => { const r = (hi - lo) / 4, e = 10 ** Math.floor(Math.log10(r)); return [1, 2, 5, 10].map(m => m * e).find(s => s >= r); })();
@@ -748,7 +700,7 @@ function graficoLinha(alvo, dados, campo, un, casas) {
   alvo.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${campo === "temp" ? "Temperatura" : "Umidade"} na janela">
       ${grade}<line x1="${mE}" x2="${W - mD}" y1="${H - mB}" y2="${H - mB}" stroke="var(--linha)"/>${eixoX}
       <path d="${caminho}" fill="none" stroke="var(--modelo)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
-      ${pts.length === 1 || (pts.length > 1 && (ult.t - pts[pts.length - 2].t) / 1000 > limiteQuebra) ?
+      ${pts.length === 1 || (pts.length > 1 && (ult.t - pts[pts.length - 2].t) / 1000 > FALHA_GAP_S) ?
         `<circle cx="${x(ult.t)}" cy="${y(ult.v)}" r="4" fill="var(--modelo)" stroke="var(--cartao)" stroke-width="2"/>` : ""}
       <g class="mira" style="display:none"><line y1="${mT}" y2="${H - mB}" stroke="var(--mudo)" stroke-dasharray="3 3"/>
         <circle r="4.5" fill="var(--modelo)" stroke="var(--cartao)" stroke-width="2"/></g>
